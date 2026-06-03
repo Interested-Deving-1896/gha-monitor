@@ -1,14 +1,16 @@
 import type { RollupResult } from '../core/types.js';
 import { daysInMonth } from '../core/window.js';
 
-const WIDE = 55; // total line width
+const RULER_WIDTH = 55; // total line width
 
 function ruler(char: string): string {
-  return char.repeat(WIDE);
+  return char.repeat(RULER_WIDTH);
 }
 
 function sectionHeader(title: string): string {
-  const right = ruler('─').slice(title.length + 4);
+  // prefix is `── <title> ─` = 4 + title.length chars; pad to RULER_WIDTH
+  const prefixLen = 4 + title.length;
+  const right = '─'.repeat(Math.max(0, RULER_WIDTH - prefixLen));
   return `── ${title} ─${right}`;
 }
 
@@ -52,7 +54,7 @@ export function renderTable(result: RollupResult, quota: number): string {
   lines.push(ruler('═'));
 
   const usedPct = quota > 0 ? ((totalBilledMinutes / quota) * 100).toFixed(1) : '0.0';
-  lines.push(` Total billed:   ${totalBilledMinutes} / ${quota} min   (${usedPct}%)`);
+  lines.push(` Total billed:   ${Math.round(totalBilledMinutes)} / ${Math.round(quota)} min   (${usedPct}%)`);
 
   // Projection: use daysInWindow as elapsed days
   const burnPerDay = win.daysInWindow > 0 ? totalBilledMinutes / win.daysInWindow : 0;
@@ -134,7 +136,7 @@ export function renderTable(result: RollupResult, quota: number): string {
     const topWf = byWorkflow.slice(0, 20);
     for (let i = 0; i < topWf.length; i++) {
       const row = topWf[i];
-      const label = `${row.repo}  /  ${row.workflowName}`;
+      const label = `${row.repo} / ${row.workflowName}`;
       lines.push('  ' + col(i + 1, 4) + col(label, wfColW) + col(row.billedMinutes, 12, true));
     }
     lines.push('');

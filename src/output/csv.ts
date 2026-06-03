@@ -1,9 +1,9 @@
 import type { RollupResult } from '../core/types.js';
 
-/** Escape a single CSV field value: wrap in quotes if it contains comma, quote, or newline. */
+/** Escape a single CSV field value: wrap in quotes if it contains comma, quote, newline, or carriage return. */
 function csvField(value: string | number): string {
   const s = String(value);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
@@ -14,15 +14,19 @@ function csvRow(fields: (string | number)[]): string {
 }
 
 /**
- * One row per leaf entry. Headers: repo,workflow,job,os,rawMinApprox,multiplier,billedMin
+ * One row per leaf entry. Headers: repo,workflow,job,os,rawMinApprox_dominant_os,multiplier,billedMin
  *
  * Priority:
  * 1. If byJob is populated  → one row per job.
  * 2. Else if byWorkflow is populated → one row per workflow (job = "").
  * 3. Else → one row per repo (workflow = "", job = "").
+ *
+ * Note: the `os`, `rawMinApprox_dominant_os`, and `multiplier` columns use the repo's dominant OS
+ * as an approximation for workflow/job rows. For accurate per-job OS breakdown, use `--json`
+ * which includes full reconciliation data.
  */
 export function renderCsv(result: RollupResult): string {
-  const headers = 'repo,workflow,job,os,rawMinApprox,multiplier,billedMin';
+  const headers = 'repo,workflow,job,os,rawMinApprox_dominant_os,multiplier,billedMin';
   const rows: string[] = [headers];
 
   // Build a lookup from repo -> dominant OS for fallback columns
@@ -60,5 +64,5 @@ export function renderCsv(result: RollupResult): string {
     }
   }
 
-  return rows.join('\n');
+  return rows.join('\n') + '\n';
 }
