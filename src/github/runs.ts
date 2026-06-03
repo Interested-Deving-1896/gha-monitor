@@ -15,11 +15,15 @@ export async function listRuns(
   owner: string,
   repo: string,
   sinceISO: string,            // e.g. "2024-03-01"
+  untilISO?: string,           // e.g. "2024-03-31" (inclusive upper bound)
 ): Promise<WorkflowRun[]> {
+  const createdFilter = untilISO
+    ? `${sinceISO}..${untilISO}`
+    : `>=${sinceISO}`;
   const runs = await octokit.paginate('GET /repos/{owner}/{repo}/actions/runs', {
     owner,
     repo,
-    created: `>=${sinceISO}`,  // server-side date filter
+    created: createdFilter,    // server-side date filter
     per_page: 100,
   });
   return runs.map(r => ({

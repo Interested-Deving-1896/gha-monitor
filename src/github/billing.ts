@@ -53,6 +53,10 @@ export async function fetchBillingUsage(
       return { items: [], available: false };
     }
 
+    if (status === 400) {
+      throw new Error(`Billing API returned 400 Bad Request — check that year/month parameters are valid (year=${window.year}, month=${window.month})`);
+    }
+
     throw error;
   }
 }

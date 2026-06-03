@@ -7,10 +7,16 @@ export async function fetchRunTiming(
   repo: string,
   runId: number,
 ): Promise<RunTiming> {
-  const response = await octokit.request(
-    'GET /repos/{owner}/{repo}/actions/runs/{run_id}/timing',
-    { owner, repo, run_id: runId }
-  );
+  let response;
+  try {
+    response = await octokit.request(
+      'GET /repos/{owner}/{repo}/actions/runs/{run_id}/timing',
+      { owner, repo, run_id: runId }
+    );
+  } catch (err) {
+    console.warn(`[gha-monitor] Failed to fetch timing for run ${runId}:`, err);
+    return { runId, billable: {} };
+  }
 
   // The response shape: response.data.billable is an object keyed by OS
   // e.g. { UBUNTU: { total_ms: 5000, jobs: 1, job_runs: [{job_id: 123, duration_ms: 5000}] } }
@@ -22,11 +28,11 @@ export async function fetchRunTiming(
   for (const os of osKeys) {
     const raw = (response.data.billable as Record<string, unknown>)[os];
     if (raw && typeof raw === 'object') {
-      const r = raw as { total_ms: number; jobs: number; job_runs: Array<{job_id: number; duration_ms: number}> };
+      const r = raw as { total_ms: number; jobs: number; job_runs?: Array<{job_id: number; duration_ms: number}> };
       billable[os] = {
         totalMs: r.total_ms,
         jobs: r.jobs,
-        jobRuns: r.job_runs.map(jr => ({ jobId: jr.job_id, durationMs: jr.duration_ms })),
+        jobRuns: (r.job_runs ?? []).map(jr => ({ jobId: jr.job_id, durationMs: jr.duration_ms })),
       };
     }
   }

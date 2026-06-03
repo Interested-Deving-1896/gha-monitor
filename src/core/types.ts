@@ -90,6 +90,7 @@ export interface TimeWindow {
   month: number;           // 1-12
   day?: number;
   sinceISO: string;        // ISO date string YYYY-MM-DD
+  untilISO?: string;       // ISO date string YYYY-MM-DD (inclusive upper bound)
   daysInWindow: number;    // number of calendar days in the window
 }
 

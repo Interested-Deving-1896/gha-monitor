@@ -34,10 +34,12 @@ export function resolveWindow(opts: WindowOpts, now: Date = new Date()): TimeWin
     const { month, year } = opts;
     const dim = daysInMonth(year, month);
     const mm = String(month).padStart(2, '0');
+    const lastDay = String(dim).padStart(2, '0');
     return {
       year,
       month,
       sinceISO: `${year}-${mm}-01`,
+      untilISO: `${year}-${mm}-${lastDay}`,
       daysInWindow: dim,
     };
   }
@@ -47,6 +49,10 @@ export function resolveWindow(opts: WindowOpts, now: Date = new Date()): TimeWin
   const todayYear = now.getUTCFullYear();
   const todayMonth = now.getUTCMonth() + 1; // 1-12
   const todayDay = now.getUTCDate();
+
+  const todayYYYY = String(todayYear);
+  const todayMM = String(todayMonth).padStart(2, '0');
+  const todayDD = String(todayDay).padStart(2, '0');
 
   // Start date: today - (days - 1) days
   const startTs = Date.UTC(todayYear, todayMonth - 1, todayDay - (days - 1));
@@ -60,6 +66,7 @@ export function resolveWindow(opts: WindowOpts, now: Date = new Date()): TimeWin
     month: todayMonth,
     day: todayDay,
     sinceISO: `${sy}-${sm}-${sd}`,
+    untilISO: `${todayYYYY}-${todayMM}-${todayDD}`,
     daysInWindow: days,
   };
 }
