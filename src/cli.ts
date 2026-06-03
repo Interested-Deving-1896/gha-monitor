@@ -28,7 +28,7 @@ program
   .option('--json', 'output as JSON')
   .option('--csv', 'output as CSV')
   .option('--token <t>', 'GitHub PAT (default: $GH_TOKEN or $GITHUB_TOKEN)')
-  .option('--quota <n>', 'monthly minute quota for reporting (default: 3000)', parseInt);
+  .option('--quota <n>', 'monthly minute quota for reporting', parseInt, 3000);
 
 program.action(async (opts) => {
   try {
@@ -39,7 +39,7 @@ program.action(async (opts) => {
       noTiming: opts.timing === false ? true : (opts.noTiming ?? false),
     };
     const config = resolveConfig(resolvedOpts);
-    const quota = opts.quota ?? 3000;
+    const quota = opts.quota as number;
 
     // 2. createClient
     const octokit = createClient(config.token);
@@ -67,13 +67,14 @@ program.action(async (opts) => {
           repoMinutes.set(item.repositoryName, (repoMinutes.get(item.repositoryName) ?? 0) + item.quantity);
         }
       }
+      const repoByName = new Map(allRepos.map(r => [r.name, r]));
       targetRepos = [...repoMinutes.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, config.top)
         .map(([repo]) => {
           // billing items have just the repo name, not full_name
           // find the matching full_name from allRepos
-          const found = allRepos.find(r => r.name === repo || r.fullName.endsWith('/' + repo));
+          const found = repoByName.get(repo) ?? allRepos.find(r => r.fullName.endsWith('/' + repo));
           return found?.fullName ?? `${config.org}/${repo}`;
         });
     } else {
@@ -88,23 +89,29 @@ program.action(async (opts) => {
 
     if (!config.noTiming) {
       console.error(`Fetching runs for ${targetRepos.length} repos (concurrency: ${config.concurrency})...`);
-      const limit = pLimit(config.concurrency);
+      const repoLimit = pLimit(config.concurrency);
+      const runLimit = pLimit(config.concurrency * 4);
       const needJobs = config.by.has('job');
 
-      await Promise.all(targetRepos.map(fullName => limit(async () => {
+      await Promise.all(targetRepos.map(fullName => repoLimit(async () => {
         const [owner, repo] = fullName.split('/');
 
-        // List runs with server-side date filter
-        const runs = await listRuns(octokit, owner, repo, config.window.sinceISO);
+        // List runs with server-side date filter (bounded by untilISO when set)
+        const runs = await listRuns(octokit, owner, repo, config.window.sinceISO, config.window.untilISO);
         console.error(`  ${fullName}: ${runs.length} runs`);
 
-        // For each run, fetch timing (nested concurrency, same limit pool)
-        await Promise.all(runs.map(run => limit(async () => {
+        // For each run, fetch timing (separate pool to avoid deadlock with outer repoLimit)
+        await Promise.all(runs.map(run => runLimit(async () => {
           const timing = await fetchRunTiming(octokit, owner, repo, run.id);
 
           let jobNames: Map<number, string> | undefined;
           if (needJobs) {
-            jobNames = await fetchJobNames(octokit, owner, repo, run.id);
+            try {
+              jobNames = await fetchJobNames(octokit, owner, repo, run.id);
+            } catch (err) {
+              console.error(`  ⚠ Could not fetch job names for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+              jobNames = new Map();
+            }
           }
 
           annotatedRuns.push({

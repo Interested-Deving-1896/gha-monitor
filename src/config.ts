@@ -14,6 +14,7 @@ export interface CliOpts {
   json?: boolean;
   csv?: boolean;
   token?: string;
+  quota?: number;
 }
 
 const VALID_GROUP_BY = new Set(['repo', 'workflow', 'job', 'os'] as const);
