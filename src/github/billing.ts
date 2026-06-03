@@ -12,20 +12,29 @@ export async function fetchBillingUsage(
   window: TimeWindow,
 ): Promise<BillingResult> {
   try {
+    // Intentionally omit 'day' — the billing API with day=D returns MTD (day 1 to D),
+    // not a rolling window. We fetch the full month and filter client-side by date range.
     const response = await octokit.request(
       'GET /organizations/{org}/settings/billing/usage',
       {
         org,
         year: window.year,
         month: window.month,
-        ...(window.day !== undefined ? { day: window.day } : {}),
       },
     );
 
     const usageItems = (response.data as { usageItems: LineItem[] }).usageItems;
 
+    const sinceDate = window.sinceISO;        // "YYYY-MM-DD"
+    const untilDate = window.untilISO;        // "YYYY-MM-DD" or undefined
+
     const items: LineItem[] = usageItems
-      .filter((item) => item.product === 'Actions')
+      .filter((item) => {
+        if (item.product !== 'Actions') return false;
+        if (item.date < sinceDate) return false;
+        if (untilDate && item.date > untilDate) return false;
+        return true;
+      })
       .map((item) => ({
         date: item.date,
         product: item.product,

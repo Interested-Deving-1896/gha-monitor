@@ -17,8 +17,8 @@ Results can be output as a formatted table (default), JSON, or CSV for further a
 
 - **Node.js 20+**
 - **GitHub Personal Access Token (PAT)** with the following scopes:
-  - `repo` — read access to repositories and workflow runs
-  - `read:org` — read access to organization billing data
+  - Classic PAT: `repo` + `manage_billing:org` (billing API) + `read:org` (list org repos and runs)
+  - Fine-grained alternative: org Administration: read + Actions: read + Billing: read
 
 Set your token via the `GITHUB_TOKEN` environment variable:
 
@@ -35,23 +35,26 @@ npm install -g gha-monitor
 ## Usage
 
 ```sh
-# Analyze an entire organization (last 30 days by default)
+# Analyze an entire organization (last 7 days by default)
 gha-monitor --org my-org
 
-# Limit to the last 7 days
-gha-monitor --org my-org --days 7
+# Limit to the last 14 days
+gha-monitor --org my-org --days 14
 
 # Skip per-job timing data (faster, uses only billing API)
 gha-monitor --org my-org --no-timing
+
+# Show only the top 1 repo
+gha-monitor --org my-org --top 1
+
+# Break down by workflow
+gha-monitor --org my-org --by workflow
 
 # Output as JSON
 gha-monitor --org my-org --json
 
 # Output as CSV
 gha-monitor --org my-org --csv
-
-# Analyze a single repository
-gha-monitor --repo my-org/my-repo --days 14
 ```
 
 ## Output

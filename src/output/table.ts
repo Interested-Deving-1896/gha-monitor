@@ -137,7 +137,7 @@ export function renderTable(result: RollupResult, quota: number): string {
     for (let i = 0; i < topWf.length; i++) {
       const row = topWf[i];
       const label = `${row.repo} / ${row.workflowName}`;
-      lines.push('  ' + col(i + 1, 4) + col(label, wfColW) + col(row.billedMinutes, 12, true));
+      lines.push('  ' + col(i + 1, 4) + col(label, wfColW) + col(Math.round(row.billedMinutes), 12, true));
     }
     lines.push('');
   }
@@ -151,7 +151,7 @@ export function renderTable(result: RollupResult, quota: number): string {
     for (let i = 0; i < topJobs.length; i++) {
       const row = topJobs[i];
       const label = `${row.repo} / ${row.workflowName} / ${row.jobName}`;
-      lines.push('  ' + col(i + 1, 4) + col(label, jobColW) + col(row.billedMinutes, 12, true));
+      lines.push('  ' + col(i + 1, 4) + col(label, jobColW) + col(Math.round(row.billedMinutes), 12, true));
     }
     lines.push('');
   }

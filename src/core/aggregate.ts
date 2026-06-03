@@ -64,21 +64,31 @@ export function rollupByRepo(items: LineItem[]): RepoRollup[] {
  * Returns sorted descending by billedMinutes.
  */
 export function rollupByOs(items: LineItem[]): OsRollup[] {
-  // Map: sku -> { os, minutes }
-  const skuMap = new Map<string, { os: OsKey; minutes: number }>();
+  // Map: OsKey -> { sku (most common seen), minutes }
+  // Group by OsKey so "Actions Linux" and "Actions Linux 4-core" both merge into UBUNTU.
+  const osMap = new Map<OsKey, { sku: string; skuCount: Map<string, number>; minutes: number }>();
 
   for (const item of items) {
     const osKey = skuToOsKey(item.sku);
     if (osKey === null) continue; // skip unrecognized SKUs
 
-    if (!skuMap.has(item.sku)) {
-      skuMap.set(item.sku, { os: osKey, minutes: 0 });
+    if (!osMap.has(osKey)) {
+      osMap.set(osKey, { sku: item.sku, skuCount: new Map(), minutes: 0 });
     }
-    skuMap.get(item.sku)!.minutes += item.quantity;
+    const entry = osMap.get(osKey)!;
+    entry.minutes += item.quantity;
+    entry.skuCount.set(item.sku, (entry.skuCount.get(item.sku) ?? 0) + 1);
+    // Track the most frequently seen SKU as the label
+    let maxCount = 0;
+    let mostCommonSku = entry.sku;
+    for (const [s, cnt] of entry.skuCount) {
+      if (cnt > maxCount) { maxCount = cnt; mostCommonSku = s; }
+    }
+    entry.sku = mostCommonSku;
   }
 
   const rollups: OsRollup[] = [];
-  for (const [sku, { os, minutes }] of skuMap) {
+  for (const [os, { sku, minutes }] of osMap) {
     rollups.push({
       os,
       sku,
@@ -305,23 +315,29 @@ export function buildRollupResult(params: {
   const byJob: JobRollup[] = [];
   const reconciliation: ReconciliationInfo[] = [];
 
+  const wantWorkflow = config.by.has('workflow') || config.by.has('job');
+  const wantJob = config.by.has('job');
+
   for (const repoRollup of byRepo) {
     const repoRuns = runs.filter((r) => r.repo === repoRollup.repo);
     const repoBilledMinutes = repoRollup.billedMinutes;
 
     if (repoRuns.length > 0) {
-      const wfRollups = apportionByWorkflow(repoRuns, repoBilledMinutes);
-      byWorkflow.push(...wfRollups);
+      if (wantWorkflow) {
+        const wfRollups = apportionByWorkflow(repoRuns, repoBilledMinutes);
+        byWorkflow.push(...wfRollups);
 
-      // Fix 3: apportion jobs per-workflow so each workflow's jobs sum to that workflow's allocation
-      for (const wf of wfRollups) {
-        const wfRuns = repoRuns.filter((r) => r.workflowName === wf.workflowName);
-        const wfJobs = apportionByJob(wfRuns, wf.billedMinutes);
-        byJob.push(...wfJobs);
+        if (wantJob) {
+          // Apportion jobs per-workflow so each workflow's jobs sum to that workflow's allocation
+          for (const wf of wfRollups) {
+            const wfRuns = repoRuns.filter((r) => r.workflowName === wf.workflowName);
+            const wfJobs = apportionByJob(wfRuns, wf.billedMinutes);
+            byJob.push(...wfJobs);
+          }
+        }
       }
 
       if (billing.available) {
-        // Fix 6: use already-computed timingByRepo instead of recomputing inline
         const timingMin = timingByRepo.get(repoRollup.repo) ?? 0;
         reconciliation.push({
           repo: repoRollup.repo,
