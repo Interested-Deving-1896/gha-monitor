@@ -31,34 +31,48 @@ cp .env .env.local
 
 ## Installation
 
+Clone the repo and install dependencies. The `prepare` script compiles TypeScript to `dist/` automatically on install:
+
 ```sh
-npm install -g gha-monitor
+git clone <repo-url> gha-monitor
+cd gha-monitor
+npm install
+```
+
+Then run the CLI from the repo directory (so `.env.local` is picked up):
+
+```sh
+node dist/cli.js --org my-org
+# or, without a build step, during development:
+npm run dev -- --org my-org
 ```
 
 ## Usage
 
 ```sh
 # Analyze an entire organization (last 7 days by default)
-gha-monitor --org my-org
+node dist/cli.js --org my-org
 
 # Limit to the last 14 days
-gha-monitor --org my-org --days 14
+node dist/cli.js --org my-org --days 14
 
 # Skip per-job timing data (faster, uses only billing API)
-gha-monitor --org my-org --no-timing
+node dist/cli.js --org my-org --no-timing
 
 # Show only the top 1 repo
-gha-monitor --org my-org --top 1
+node dist/cli.js --org my-org --top 1
 
 # Break down by workflow
-gha-monitor --org my-org --by workflow
+node dist/cli.js --org my-org --by workflow
 
 # Output as JSON
-gha-monitor --org my-org --json
+node dist/cli.js --org my-org --json
 
 # Output as CSV
-gha-monitor --org my-org --csv
+node dist/cli.js --org my-org --csv
 ```
+
+> **Dev shortcut:** replace `node dist/cli.js` with `npm run dev --` to run via tsx without a build step.
 
 ## Output
 
