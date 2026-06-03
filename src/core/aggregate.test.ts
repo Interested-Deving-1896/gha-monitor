@@ -1,0 +1,508 @@
+import { describe, it, expect } from 'vitest';
+import type { LineItem, AnnotatedRun, RunTiming } from './types.js';
+import {
+  rollupByRepo,
+  rollupByOs,
+  computeTimingByRepo,
+  reconciliationRatio,
+  apportionByWorkflow,
+  apportionByJob,
+  buildRollupResult,
+} from './aggregate.js';
+import type { BillingResult } from '../github/billing.js';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function makeLineItem(overrides: Partial<LineItem>): LineItem {
+  return {
+    date: '2024-01-15',
+    product: 'Actions',
+    sku: 'Actions Linux',
+    quantity: 10,
+    unitType: 'minutes',
+    pricePerUnit: 0.008,
+    grossAmount: 0.08,
+    discountAmount: 0,
+    netAmount: 0.08,
+    repositoryName: 'myorg/myrepo',
+    organizationName: 'myorg',
+    ...overrides,
+  };
+}
+
+function makeRunTiming(billable: RunTiming['billable']): RunTiming {
+  return { runId: Math.floor(Math.random() * 1_000_000), billable };
+}
+
+function makeAnnotatedRun(overrides: Partial<AnnotatedRun> & { timing: RunTiming }): AnnotatedRun {
+  return {
+    repo: 'myorg/myrepo',
+    workflowName: 'CI',
+    runId: overrides.timing.runId,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// rollupByRepo
+// ---------------------------------------------------------------------------
+
+describe('rollupByRepo', () => {
+  it('groups items by repo, sums billed minutes, sorts descending', () => {
+    const items: LineItem[] = [
+      makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions Linux', quantity: 30 }),
+      makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions macOS', quantity: 20 }),
+      makeLineItem({ repositoryName: 'myorg/repoB', sku: 'Actions Linux', quantity: 100 }),
+    ];
+
+    const result = rollupByRepo(items);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].repo).toBe('myorg/repoB');
+    expect(result[0].billedMinutes).toBe(100);
+    expect(result[1].repo).toBe('myorg/repoA');
+    expect(result[1].billedMinutes).toBe(50);
+  });
+
+  it('computes percentOfTotal correctly', () => {
+    const items: LineItem[] = [
+      makeLineItem({ repositoryName: 'myorg/repoA', quantity: 75 }),
+      makeLineItem({ repositoryName: 'myorg/repoB', quantity: 25 }),
+    ];
+
+    const result = rollupByRepo(items);
+
+    expect(result[0].percentOfTotal).toBeCloseTo(75, 5);
+    expect(result[1].percentOfTotal).toBeCloseTo(25, 5);
+  });
+
+  it('determines dominantOs as the OS with most billed minutes for that repo', () => {
+    const items: LineItem[] = [
+      makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions Linux', quantity: 30 }),
+      makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions macOS', quantity: 200 }),
+    ];
+
+    const result = rollupByRepo(items);
+
+    expect(result[0].repo).toBe('myorg/repoA');
+    expect(result[0].dominantOs).toBe('MACOS');
+  });
+
+  it('sets dominantOs to null for unrecognized SKU', () => {
+    const items: LineItem[] = [
+      makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions Storage', quantity: 5 }),
+    ];
+
+    const result = rollupByRepo(items);
+
+    expect(result[0].dominantOs).toBeNull();
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(rollupByRepo([])).toEqual([]);
+  });
+
+  it('handles items without repositoryName by grouping under empty string', () => {
+    const items: LineItem[] = [
+      makeLineItem({ repositoryName: undefined, sku: 'Actions Linux', quantity: 5 }),
+    ];
+
+    const result = rollupByRepo(items);
+    expect(result).toHaveLength(1);
+    expect(result[0].billedMinutes).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rollupByOs
+// ---------------------------------------------------------------------------
+
+describe('rollupByOs', () => {
+  it('groups by SKU, maps to OsKey, sums billed minutes, sorts descending', () => {
+    const items: LineItem[] = [
+      makeLineItem({ sku: 'Actions Linux', quantity: 100 }),
+      makeLineItem({ sku: 'Actions Linux', quantity: 50 }),
+      makeLineItem({ sku: 'Actions macOS', quantity: 200 }),
+    ];
+
+    const result = rollupByOs(items);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].os).toBe('MACOS');
+    expect(result[0].billedMinutes).toBe(200);
+    expect(result[0].multiplier).toBe(10);
+    expect(result[1].os).toBe('UBUNTU');
+    expect(result[1].billedMinutes).toBe(150);
+    expect(result[1].multiplier).toBe(1);
+  });
+
+  it('includes the sku string on the result', () => {
+    const items: LineItem[] = [
+      makeLineItem({ sku: 'Actions Windows', quantity: 40 }),
+    ];
+
+    const result = rollupByOs(items);
+
+    expect(result[0].sku).toBe('Actions Windows');
+    expect(result[0].os).toBe('WINDOWS');
+    expect(result[0].multiplier).toBe(2);
+  });
+
+  it('skips unrecognized SKUs (no matching OsKey)', () => {
+    const items: LineItem[] = [
+      makeLineItem({ sku: 'Actions Linux', quantity: 10 }),
+      makeLineItem({ sku: 'Actions Storage', quantity: 99 }),
+    ];
+
+    const result = rollupByOs(items);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].os).toBe('UBUNTU');
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(rollupByOs([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeTimingByRepo
+// ---------------------------------------------------------------------------
+
+describe('computeTimingByRepo', () => {
+  it('sums estimated billed minutes per repo across all runs and OS keys', () => {
+    // Run 1: UBUNTU 60s = 1 min, MACOS 60s = 10 min → 11 min
+    const t1 = makeRunTiming({
+      UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] },
+      MACOS: { totalMs: 60_000, jobs: 1, jobRuns: [] },
+    });
+    // Run 2: UBUNTU 120s = 2 min
+    const t2 = makeRunTiming({
+      UBUNTU: { totalMs: 120_000, jobs: 1, jobRuns: [] },
+    });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t2 }),
+    ];
+
+    const result = computeTimingByRepo(runs);
+
+    // repo A: (1 + 10) + 2 = 13
+    expect(result.get('myorg/repoA')).toBe(13);
+  });
+
+  it('groups different repos separately', () => {
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 180_000, jobs: 1, jobRuns: [] } });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repoB', workflowName: 'Deploy', timing: t2 }),
+    ];
+
+    const result = computeTimingByRepo(runs);
+
+    expect(result.get('myorg/repoA')).toBe(1);
+    expect(result.get('myorg/repoB')).toBe(3);
+  });
+
+  it('returns empty map for empty runs', () => {
+    expect(computeTimingByRepo([])).toEqual(new Map());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconciliationRatio
+// ---------------------------------------------------------------------------
+
+describe('reconciliationRatio', () => {
+  it('returns timingMin / billingMin', () => {
+    expect(reconciliationRatio(100, 95)).toBeCloseTo(0.95, 5);
+  });
+
+  it('returns 1 when billingMin is 0 (avoid division by zero)', () => {
+    expect(reconciliationRatio(0, 50)).toBe(1);
+  });
+
+  it('returns 1 when both are 0', () => {
+    expect(reconciliationRatio(0, 0)).toBe(1);
+  });
+
+  it('returns ratio > 1 when timing exceeds billing', () => {
+    expect(reconciliationRatio(100, 110)).toBeCloseTo(1.1, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// apportionByWorkflow
+// ---------------------------------------------------------------------------
+
+describe('apportionByWorkflow', () => {
+  it('apportions minutes proportionally across workflows', () => {
+    // Workflow A: 60s UBUNTU = 1 min
+    // Workflow B: 120s UBUNTU = 2 min
+    // total timing = 3 min; repoBilledMinutes = 90
+    // A share = 1/3 * 90 = 30; B share = 2/3 * 90 = 60
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 120_000, jobs: 1, jobRuns: [] } });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WorkflowA', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WorkflowB', timing: t2 }),
+    ];
+
+    const result = apportionByWorkflow(runs, 90);
+
+    expect(result).toHaveLength(2);
+    // Sort descending by billedMinutes
+    expect(result[0].workflowName).toBe('WorkflowB');
+    expect(result[0].billedMinutes).toBeCloseTo(60, 5);
+    expect(result[1].workflowName).toBe('WorkflowA');
+    expect(result[1].billedMinutes).toBeCloseTo(30, 5);
+  });
+
+  it('ensures sum of apportioned minutes equals repoBilledMinutes exactly (invariant)', () => {
+    // Use fractional splits that would drift with floating point
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 100_000, jobs: 1, jobRuns: [] } });
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 100_000, jobs: 1, jobRuns: [] } });
+    const t3 = makeRunTiming({ UBUNTU: { totalMs: 100_000, jobs: 1, jobRuns: [] } });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WF1', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WF2', timing: t2 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WF3', timing: t3 }),
+    ];
+
+    const repoBilledMinutes = 100;
+    const result = apportionByWorkflow(runs, repoBilledMinutes);
+
+    const total = result.reduce((acc, r) => acc + r.billedMinutes, 0);
+    expect(total).toBeCloseTo(repoBilledMinutes, 2);
+  });
+
+  it('distributes evenly when total timing minutes is 0', () => {
+    const t1 = makeRunTiming({});
+    const t2 = makeRunTiming({});
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WF1', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'WF2', timing: t2 }),
+    ];
+
+    const result = apportionByWorkflow(runs, 20);
+
+    expect(result).toHaveLength(2);
+    const total = result.reduce((acc, r) => acc + r.billedMinutes, 0);
+    expect(total).toBeCloseTo(20, 5);
+    // Each should be 10
+    for (const wf of result) {
+      expect(wf.billedMinutes).toBeCloseTo(10, 5);
+    }
+  });
+
+  it('groups multiple runs with same workflow name', () => {
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const t3 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t2 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'Deploy', timing: t3 }),
+    ];
+
+    const result = apportionByWorkflow(runs, 90);
+
+    expect(result).toHaveLength(2);
+    const ci = result.find((r) => r.workflowName === 'CI')!;
+    const deploy = result.find((r) => r.workflowName === 'Deploy')!;
+    expect(ci.billedMinutes).toBeCloseTo(60, 5);
+    expect(deploy.billedMinutes).toBeCloseTo(30, 5);
+  });
+
+  it('returns empty array for empty runs', () => {
+    expect(apportionByWorkflow([], 100)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// apportionByJob
+// ---------------------------------------------------------------------------
+
+describe('apportionByJob', () => {
+  it('apportions minutes by job using jobNames map', () => {
+    // Job 1 (id=1): 60s UBUNTU = 1 min
+    // Job 2 (id=2): 60s UBUNTU = 1 min
+    const timing: RunTiming = {
+      runId: 999,
+      billable: {
+        UBUNTU: {
+          totalMs: 120_000,
+          jobs: 2,
+          jobRuns: [
+            { jobId: 1, durationMs: 60_000 },
+            { jobId: 2, durationMs: 60_000 },
+          ],
+        },
+      },
+    };
+
+    const run: AnnotatedRun = {
+      repo: 'myorg/repo',
+      workflowName: 'CI',
+      runId: 999,
+      timing,
+      jobNames: new Map([[1, 'build'], [2, 'test']]),
+    };
+
+    const result = apportionByJob([run], 100);
+
+    expect(result).toHaveLength(2);
+    const total = result.reduce((acc, r) => acc + r.billedMinutes, 0);
+    expect(total).toBeCloseTo(100, 2);
+    // Each job: 60s / 120s total = 50%
+    for (const job of result) {
+      expect(job.billedMinutes).toBeCloseTo(50, 2);
+    }
+  });
+
+  it('skips runs without jobNames', () => {
+    const t = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [{ jobId: 1, durationMs: 60_000 }] } });
+    const run: AnnotatedRun = {
+      repo: 'myorg/repo',
+      workflowName: 'CI',
+      runId: t.runId,
+      timing: t,
+      // no jobNames
+    };
+
+    const result = apportionByJob([run], 100);
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty array for empty runs', () => {
+    expect(apportionByJob([], 100)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRollupResult
+// ---------------------------------------------------------------------------
+
+describe('buildRollupResult', () => {
+  const baseConfig = {
+    org: 'myorg',
+    token: 'tok',
+    window: {
+      year: 2024,
+      month: 1,
+      sinceISO: '2024-01-01',
+      daysInWindow: 31,
+    },
+    by: new Set(['repo', 'workflow'] as const),
+    top: 10,
+    source: 'auto' as const,
+    noTiming: false,
+    concurrency: 5,
+    outputFormat: 'table' as const,
+  };
+
+  it('uses billing as authority when billingAvailable=true', () => {
+    const billing: BillingResult = {
+      available: true,
+      items: [
+        makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions Linux', quantity: 100 }),
+        makeLineItem({ repositoryName: 'myorg/repoB', sku: 'Actions Linux', quantity: 50 }),
+      ],
+    };
+
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+    ];
+
+    const result = buildRollupResult({ billing, runs, config: baseConfig });
+
+    expect(result.billingAvailable).toBe(true);
+    expect(result.source).toBe('billing');
+    expect(result.totalBilledMinutes).toBe(150);
+    expect(result.byRepo).toHaveLength(2);
+    expect(result.byRepo[0].billedMinutes).toBe(100);
+    expect(result.byOs).toHaveLength(1);
+    expect(result.byOs[0].os).toBe('UBUNTU');
+    // repoA has runs → byWorkflow populated
+    expect(result.byWorkflow.length).toBeGreaterThan(0);
+    expect(result.byWorkflow[0].workflowName).toBe('CI');
+    // billing is authority so billedMinutes should equal what billing says for repoA
+    expect(result.byWorkflow[0].billedMinutes).toBeCloseTo(100, 2);
+  });
+
+  it('uses timing-estimated mode when billingAvailable=false', () => {
+    const billing: BillingResult = { available: false, items: [] };
+
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 120_000, jobs: 1, jobRuns: [] } });
+
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'Deploy', timing: t2 }),
+    ];
+
+    const result = buildRollupResult({ billing, runs, config: baseConfig });
+
+    expect(result.billingAvailable).toBe(false);
+    expect(result.source).toBe('timing-estimated');
+    // byRepo derived from timing: 1 + 2 = 3 min
+    expect(result.byRepo).toHaveLength(1);
+    expect(result.byRepo[0].repo).toBe('myorg/repoA');
+    expect(result.byRepo[0].billedMinutes).toBe(3);
+    expect(result.totalBilledMinutes).toBe(3);
+    expect(result.byOs).toEqual([]);
+  });
+
+  it('sets org and window from config', () => {
+    const billing: BillingResult = { available: false, items: [] };
+    const result = buildRollupResult({ billing, runs: [], config: baseConfig });
+
+    expect(result.org).toBe('myorg');
+    expect(result.window).toBe(baseConfig.window);
+  });
+
+  it('respects config.top limit on byRepo', () => {
+    const items: LineItem[] = Array.from({ length: 5 }, (_, i) =>
+      makeLineItem({ repositoryName: `myorg/repo${i}`, quantity: (i + 1) * 10 }),
+    );
+
+    const billing: BillingResult = { available: true, items };
+    const config = { ...baseConfig, top: 3 };
+
+    const result = buildRollupResult({ billing, runs: [], config });
+
+    expect(result.byRepo.length).toBeLessThanOrEqual(3);
+  });
+
+  it('populates reconciliation info when billing is available and runs exist', () => {
+    const billing: BillingResult = {
+      available: true,
+      items: [
+        makeLineItem({ repositoryName: 'myorg/repoA', sku: 'Actions Linux', quantity: 100 }),
+      ],
+    };
+
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+    ];
+
+    const result = buildRollupResult({ billing, runs, config: baseConfig });
+
+    expect(result.reconciliation).toHaveLength(1);
+    expect(result.reconciliation[0].repo).toBe('myorg/repoA');
+    expect(result.reconciliation[0].billingMinutes).toBe(100);
+    expect(result.reconciliation[0].timingMinutes).toBe(1);
+    expect(result.reconciliation[0].ratio).toBeCloseTo(0.01, 3);
+  });
+});
