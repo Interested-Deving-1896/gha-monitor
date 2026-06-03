@@ -30,13 +30,18 @@ export async function fetchBillingUsage(
 
     const items: LineItem[] = usageItems
       .filter((item) => {
-        if (item.product !== 'Actions') return false;
-        if (item.date < sinceDate) return false;
-        if (untilDate && item.date > untilDate) return false;
+        // The real GitHub API returns lowercase product names (e.g. "actions", not "Actions")
+        if (String(item.product).toLowerCase() !== 'actions') return false;
+        // The real API returns full ISO timestamps (e.g. "2026-06-01T00:30:45Z"), not bare
+        // YYYY-MM-DD strings. Slice to 10 chars before comparing against sinceISO/untilISO.
+        const itemDate = String(item.date).slice(0, 10);
+        if (itemDate < sinceDate) return false;
+        if (untilDate && itemDate > untilDate) return false;
         return true;
       })
       .map((item) => ({
-        date: item.date,
+        // Normalize the stored date to YYYY-MM-DD (strips any time component/timezone)
+        date: String(item.date).slice(0, 10),
         product: item.product,
         sku: item.sku,
         quantity: item.quantity,
