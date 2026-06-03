@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { LineItem, AnnotatedRun, RunTiming } from './types.js';
 import {
   rollupByRepo,
@@ -32,8 +32,12 @@ function makeLineItem(overrides: Partial<LineItem>): LineItem {
   };
 }
 
+// Fix 4: deterministic run ID counter instead of Math.random()
+let _nextRunId = 1;
+beforeEach(() => { _nextRunId = 1; });
+
 function makeRunTiming(billable: RunTiming['billable']): RunTiming {
-  return { runId: Math.floor(Math.random() * 1_000_000), billable };
+  return { runId: _nextRunId++, billable };
 }
 
 function makeAnnotatedRun(overrides: Partial<AnnotatedRun> & { timing: RunTiming }): AnnotatedRun {
@@ -385,6 +389,44 @@ describe('apportionByJob', () => {
 
   it('returns empty array for empty runs', () => {
     expect(apportionByJob([], 100)).toEqual([]);
+  });
+
+  // Fix 5: invariant test with 3 unequal jobs to exercise FP drift adjustment
+  it('sum of billedMinutes equals workflowBilledMinutes exactly (invariant, 3 unequal jobs)', () => {
+    // Job 1: 60s UBUNTU → 1 billed min
+    // Job 2: 120s UBUNTU → 2 billed min
+    // Job 3: 90s UBUNTU → 2 billed min (ceil(1.5) = 2)
+    // Weights: 1, 2, 2 → total weight 5; with workflowBilledMinutes=100:
+    //   job1 = 20, job2 = 40, job3 = 40
+    const timing: RunTiming = {
+      runId: 1,
+      billable: {
+        UBUNTU: {
+          totalMs: 270_000,
+          jobs: 3,
+          jobRuns: [
+            { jobId: 1, durationMs: 60_000 },
+            { jobId: 2, durationMs: 120_000 },
+            { jobId: 3, durationMs: 90_000 },
+          ],
+        },
+      },
+    };
+
+    const run: AnnotatedRun = {
+      repo: 'myorg/repo',
+      workflowName: 'CI',
+      runId: 1,
+      timing,
+      jobNames: new Map([[1, 'lint'], [2, 'build'], [3, 'test']]),
+    };
+
+    const workflowBilledMinutes = 100;
+    const result = apportionByJob([run], workflowBilledMinutes);
+
+    expect(result).toHaveLength(3);
+    const total = result.reduce((acc, r) => acc + r.billedMinutes, 0);
+    expect(Math.abs(total - workflowBilledMinutes)).toBeLessThan(0.01);
   });
 });
 

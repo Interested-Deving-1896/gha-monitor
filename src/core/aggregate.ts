@@ -185,19 +185,20 @@ export function apportionByWorkflow(runs: AnnotatedRun[], repoBilledMinutes: num
 // ---------------------------------------------------------------------------
 
 /**
- * Apportion repoBilledMinutes across jobs proportionally based on job timing ms.
+ * Apportion workflowBilledMinutes across jobs proportionally based on billed minutes
+ * (ceil(durationMs/60000)*MULTIPLIER[os]) so job weights are consistent with workflow weights.
  * Only includes jobs where jobNames is populated on the run.
  * Returns sorted descending by billedMinutes.
  */
-export function apportionByJob(runs: AnnotatedRun[], repoBilledMinutes: number): JobRollup[] {
+export function apportionByJob(runs: AnnotatedRun[], workflowBilledMinutes: number): JobRollup[] {
   if (runs.length === 0) return [];
 
-  // Collect job-level ms totals
+  // Collect job-level billed-minutes totals (OS-aware)
   interface JobEntry {
     repo: string;
     workflowName: string;
     jobName: string;
-    totalMs: number;
+    totalBilledMinutes: number;
   }
 
   const jobMap = new Map<number, JobEntry>();
@@ -206,7 +207,6 @@ export function apportionByJob(runs: AnnotatedRun[], repoBilledMinutes: number):
     if (!run.jobNames) continue;
 
     for (const [os, timing] of Object.entries(run.timing.billable) as [OsKey, { jobRuns: { jobId: number; durationMs: number }[] }][]) {
-      void os; // os not needed for ms-level apportionment
       for (const jobRun of timing.jobRuns) {
         const jobName = run.jobNames.get(jobRun.jobId);
         if (jobName === undefined) continue;
@@ -216,10 +216,10 @@ export function apportionByJob(runs: AnnotatedRun[], repoBilledMinutes: number):
             repo: run.repo,
             workflowName: run.workflowName,
             jobName,
-            totalMs: 0,
+            totalBilledMinutes: 0,
           });
         }
-        jobMap.get(jobRun.jobId)!.totalMs += jobRun.durationMs;
+        jobMap.get(jobRun.jobId)!.totalBilledMinutes += billedMinutes(os as OsKey, jobRun.durationMs);
       }
     }
   }
@@ -227,22 +227,22 @@ export function apportionByJob(runs: AnnotatedRun[], repoBilledMinutes: number):
   if (jobMap.size === 0) return [];
 
   const entries = [...jobMap.values()];
-  const totalMs = entries.reduce((s, e) => s + e.totalMs, 0);
+  const totalWeight = entries.reduce((s, e) => s + e.totalBilledMinutes, 0);
 
   const rollups: JobRollup[] = entries.map((e) => ({
     repo: e.repo,
     workflowName: e.workflowName,
     jobName: e.jobName,
-    billedMinutes: totalMs > 0
-      ? (e.totalMs / totalMs) * repoBilledMinutes
-      : repoBilledMinutes / entries.length,
+    billedMinutes: totalWeight > 0
+      ? (e.totalBilledMinutes / totalWeight) * workflowBilledMinutes
+      : workflowBilledMinutes / entries.length,
   }));
 
   rollups.sort((a, b) => b.billedMinutes - a.billedMinutes);
 
   // Enforce invariant
   const sumExceptLast = rollups.slice(0, -1).reduce((s, r) => s + r.billedMinutes, 0);
-  rollups[rollups.length - 1].billedMinutes = repoBilledMinutes - sumExceptLast;
+  rollups[rollups.length - 1].billedMinutes = workflowBilledMinutes - sumExceptLast;
 
   return rollups;
 }
@@ -267,30 +267,38 @@ export function buildRollupResult(params: {
   let byRepo: RepoRollup[];
   let byOs: OsRollup[];
   let source: RollupResult['source'];
+  let totalBilledMinutes: number;
 
   if (billing.available && billing.items.length > 0) {
-    byRepo = rollupByRepo(billing.items).slice(0, config.top);
+    // Fix 1: compute totalBilledMinutes from the FULL unsliced set before applying top limit
+    const unslicedByRepo = rollupByRepo(billing.items);
+    totalBilledMinutes = billing.items.reduce((sum, item) => sum + item.quantity, 0);
+    byRepo = unslicedByRepo.slice(0, config.top);
     byOs = rollupByOs(billing.items);
     source = 'billing';
   } else if (billing.available && billing.items.length === 0 && runs.length > 0) {
     // Billing available but empty — fall through to timing
     const timingMap = computeTimingByRepo(runs);
     byRepo = buildRepoRollupsFromTiming(timingMap, config.top);
+    totalBilledMinutes = byRepo.reduce((s, r) => s + r.billedMinutes, 0);
     byOs = [];
     source = 'timing-estimated';
   } else if (!billing.available) {
     const timingMap = computeTimingByRepo(runs);
     byRepo = buildRepoRollupsFromTiming(timingMap, config.top);
+    totalBilledMinutes = byRepo.reduce((s, r) => s + r.billedMinutes, 0);
     byOs = [];
     source = 'timing-estimated';
   } else {
     // billing.available=true, items=[], runs=[]
     byRepo = [];
     byOs = [];
+    totalBilledMinutes = 0;
     source = 'billing';
   }
 
-  const totalBilledMinutes = byRepo.reduce((s, r) => s + r.billedMinutes, 0);
+  // Fix 6: compute timingByRepo once and reuse for reconciliation
+  const timingByRepo = computeTimingByRepo(runs);
 
   // Build workflow/job rollups per repo
   const byWorkflow: WorkflowRollup[] = [];
@@ -305,11 +313,16 @@ export function buildRollupResult(params: {
       const wfRollups = apportionByWorkflow(repoRuns, repoBilledMinutes);
       byWorkflow.push(...wfRollups);
 
-      const jobRollups = apportionByJob(repoRuns, repoBilledMinutes);
-      byJob.push(...jobRollups);
+      // Fix 3: apportion jobs per-workflow so each workflow's jobs sum to that workflow's allocation
+      for (const wf of wfRollups) {
+        const wfRuns = repoRuns.filter((r) => r.workflowName === wf.workflowName);
+        const wfJobs = apportionByJob(wfRuns, wf.billedMinutes);
+        byJob.push(...wfJobs);
+      }
 
       if (billing.available) {
-        const timingMin = repoRuns.reduce((s, r) => s + estimatedMinutesForRun(r), 0);
+        // Fix 6: use already-computed timingByRepo instead of recomputing inline
+        const timingMin = timingByRepo.get(repoRollup.repo) ?? 0;
         reconciliation.push({
           repo: repoRollup.repo,
           billingMinutes: repoBilledMinutes,
