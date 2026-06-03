@@ -28,6 +28,9 @@ export interface OsTiming {
 export interface RunTiming {
   runId: number;
   billable: Partial<Record<OsKey, OsTiming>>;
+  /** Wall-clock duration in ms from run_duration_ms. Used as fallback when
+   *  billable.*.totalMs is zero (GitHub deprecated the per-OS machine-time fields). */
+  runDurationMs?: number;
 }
 
 export interface AnnotatedRun {
@@ -69,7 +72,7 @@ export interface RunRollup {
   repo: string;
   workflowName: string;
   runId: number;
-  /** Sum of OsTiming.totalMs across all OS keys — total machine-time, not wall-clock. */
+  /** Effective total ms (wall-clock run duration when billing totals are zero). */
   rawMs: number;
   /** Estimated billed minutes: ceil(ms/60000)*MULTIPLIER per OS, summed. */
   billedMinutes: number;

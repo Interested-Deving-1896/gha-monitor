@@ -15,7 +15,7 @@ export async function fetchRunTiming(
     );
   } catch (err) {
     console.warn(`[gha-monitor] Failed to fetch timing for run ${runId}:`, err);
-    return { runId, billable: {} };
+    return { runId, billable: {}, runDurationMs: 0 };
   }
 
   // The response shape: response.data.billable is an object keyed by OS
@@ -37,7 +37,7 @@ export async function fetchRunTiming(
     }
   }
 
-  return { runId, billable };
+  return { runId, billable, runDurationMs: (response.data as { run_duration_ms?: number }).run_duration_ms ?? 0 };
 }
 
 /**

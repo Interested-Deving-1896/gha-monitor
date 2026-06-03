@@ -167,7 +167,7 @@ export function renderTable(result: RollupResult, quota: number, runDisplayLimit
 
   // ── By Run ───────────────────────────────────────────────
   if (byRun.length > 0) {
-    lines.push(sectionHeader('By Run  (timing estimate — machine-time, not wall-clock)'));
+    lines.push(sectionHeader('By Run  (wall-clock run duration, OS multiplier applied)'));
     const runLabelColW = 44;
     const runIdColW = 12;
     lines.push(

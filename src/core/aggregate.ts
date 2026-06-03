@@ -1,4 +1,4 @@
-import type { LineItem, AnnotatedRun, OsKey, RepoRollup, OsRollup, WorkflowRollup, JobRollup, RunRollup, ReconciliationInfo, RollupResult, Config } from './types.js';
+import type { LineItem, AnnotatedRun, OsKey, OsTiming, RunTiming, RepoRollup, OsRollup, WorkflowRollup, JobRollup, RunRollup, ReconciliationInfo, RollupResult, Config } from './types.js';
 import { billedMinutes, skuToOsKey, MULTIPLIER } from './multipliers.js';
 import type { BillingResult } from '../github/billing.js';
 
@@ -121,11 +121,49 @@ export function computeTimingByRepo(runs: AnnotatedRun[]): Map<string, number> {
   return repoMap;
 }
 
+/**
+ * Effective per-OS machine-time in milliseconds.
+ *
+ * GitHub's `/timing` endpoint now returns `total_ms: 0` for all OS keys
+ * (the billable machine-time fields were deprecated), while `run_duration_ms`
+ * (wall-clock) is still populated. When every OS bucket totals zero we fall
+ * back to distributing `runDurationMs` across the present OS buckets by job
+ * count (proportional proxy for actual machine-time).
+ *
+ * If both totals and `runDurationMs` are zero, every entry gets 0 — the run
+ * will be excluded by callers that filter on zero.
+ */
+export function effectiveOsMs(timing: RunTiming): Array<[OsKey, number]> {
+  const entries = Object.entries(timing.billable) as [OsKey, OsTiming][];
+  if (entries.length === 0) return [];
+
+  const totalMs = entries.reduce((s, [, t]) => s + t.totalMs, 0);
+  if (totalMs > 0) {
+    // Normal path: real machine-time is present
+    return entries.map(([os, t]) => [os, t.totalMs]);
+  }
+
+  // Fallback path: all billable totals are zero (deprecated endpoint).
+  // Distribute run_duration_ms proportionally by job count.
+  const dur = timing.runDurationMs ?? 0;
+  if (dur > 0) {
+    const totalJobs = entries.reduce((s, [, t]) => s + (t.jobs || 0), 0);
+    if (totalJobs > 0) {
+      return entries.map(([os, t]) => [os, dur * ((t.jobs || 0) / totalJobs)]);
+    }
+    // No job counts — split evenly
+    return entries.map(([os]) => [os, dur / entries.length]);
+  }
+
+  // Genuinely no data
+  return entries.map(([os]) => [os, 0]);
+}
+
 /** Sum estimated billed minutes for a single run across all OS keys. */
 export function estimatedMinutesForRun(run: AnnotatedRun): number {
   let total = 0;
-  for (const [os, timing] of Object.entries(run.timing.billable) as [OsKey, { totalMs: number }][]) {
-    total += billedMinutes(os, timing.totalMs);
+  for (const [os, ms] of effectiveOsMs(run.timing)) {
+    total += billedMinutes(os, ms);
   }
   return total;
 }
@@ -263,10 +301,11 @@ export function apportionByJob(runs: AnnotatedRun[], workflowBilledMinutes: numb
 
 /**
  * Build a per-run summary from AnnotatedRun[].
- * rawMs = sum of OsTiming.totalMs across all OS keys (machine-time, not wall-clock).
+ * rawMs = effective per-OS ms (via effectiveOsMs — falls back to run_duration_ms
+ *         when GitHub's deprecated billable totals are all zero).
  * billedMinutes = estimatedMinutesForRun (ceil-per-OS with multiplier).
- * dominantOs = OS key with the largest totalMs.
- * Runs with rawMs === 0 (no timing data) are excluded.
+ * dominantOs = OS key with the largest effective ms.
+ * Runs with rawMs === 0 (genuinely no data) are excluded.
  * Returns sorted descending by billedMinutes. Full list — callers slice as needed.
  */
 export function buildByRun(runs: AnnotatedRun[]): RunRollup[] {
@@ -277,10 +316,10 @@ export function buildByRun(runs: AnnotatedRun[]): RunRollup[] {
     let dominantOs: OsKey | null = null;
     let maxMs = -1;
 
-    for (const [os, timing] of Object.entries(run.timing.billable) as [OsKey, { totalMs: number }][]) {
-      rawMs += timing.totalMs;
-      if (timing.totalMs > maxMs) {
-        maxMs = timing.totalMs;
+    for (const [os, ms] of effectiveOsMs(run.timing)) {
+      rawMs += ms;
+      if (ms > maxMs) {
+        maxMs = ms;
         dominantOs = os;
       }
     }

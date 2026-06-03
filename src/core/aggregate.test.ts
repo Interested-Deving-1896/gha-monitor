@@ -9,6 +9,8 @@ import {
   apportionByJob,
   buildRollupResult,
   buildByRun,
+  effectiveOsMs,
+  estimatedMinutesForRun,
 } from './aggregate.js';
 import type { BillingResult } from '../github/billing.js';
 
@@ -676,5 +678,138 @@ describe('buildByRun', () => {
 
   it('returns empty array for empty input', () => {
     expect(buildByRun([])).toEqual([]);
+  });
+
+  it('includes runs with deprecated zero total_ms when runDurationMs is set (GitHub API fallback)', () => {
+    // Real-world case: GitHub now returns total_ms=0 for all billable entries but
+    // run_duration_ms=431000 still lives on the same response. The old code filtered
+    // these out (rawMs===0 guard), leaving byRun empty. After the fix, the run must appear.
+    const timing: RunTiming = {
+      runId: 42,
+      billable: {
+        UBUNTU: { totalMs: 0, jobs: 6, jobRuns: [] },
+      },
+      runDurationMs: 431_000, // 7m 11s wall-clock
+    };
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing })];
+
+    const result = buildByRun(runs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].rawMs).toBe(431_000);
+    expect(result[0].dominantOs).toBe('UBUNTU');
+    // ceil(431000 / 60000) * UBUNTU(1×) = ceil(7.183) * 1 = 8 min
+    expect(result[0].billedMinutes).toBe(8);
+    expect(result[0].runId).toBe(42);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectiveOsMs
+// ---------------------------------------------------------------------------
+
+describe('effectiveOsMs', () => {
+  it('passes through real totalMs values when any OS has non-zero totalMs', () => {
+    const timing: RunTiming = {
+      runId: 1,
+      billable: {
+        UBUNTU: { totalMs: 60_000, jobs: 2, jobRuns: [] },
+        MACOS:  { totalMs: 30_000, jobs: 1, jobRuns: [] },
+      },
+    };
+
+    const result = effectiveOsMs(timing);
+
+    expect(result).toContainEqual(['UBUNTU', 60_000]);
+    expect(result).toContainEqual(['MACOS',  30_000]);
+  });
+
+  it('assigns all runDurationMs to the single OS bucket when billable totals are all zero', () => {
+    // Single OS bucket, 6 jobs — all machine-time goes to UBUNTU
+    const timing: RunTiming = {
+      runId: 1,
+      billable: {
+        UBUNTU: { totalMs: 0, jobs: 6, jobRuns: [] },
+      },
+      runDurationMs: 431_000,
+    };
+
+    const result = effectiveOsMs(timing);
+
+    expect(result).toHaveLength(1);
+    expect(result[0][0]).toBe('UBUNTU');
+    expect(result[0][1]).toBe(431_000);
+  });
+
+  it('splits runDurationMs proportionally by job count when multiple OS buckets present', () => {
+    // 3 UBUNTU jobs, 1 MACOS job → 3/4 Ubuntu, 1/4 MACOS
+    const timing: RunTiming = {
+      runId: 1,
+      billable: {
+        UBUNTU: { totalMs: 0, jobs: 3, jobRuns: [] },
+        MACOS:  { totalMs: 0, jobs: 1, jobRuns: [] },
+      },
+      runDurationMs: 400_000,
+    };
+
+    const result = effectiveOsMs(timing);
+    const ubuntu = result.find(([os]) => os === 'UBUNTU')![1];
+    const macos  = result.find(([os]) => os === 'MACOS')![1];
+
+    expect(ubuntu).toBeCloseTo(300_000, 1); // 3/4 × 400_000
+    expect(macos).toBeCloseTo(100_000, 1);  // 1/4 × 400_000
+  });
+
+  it('returns zeros for each OS key when both totalMs and runDurationMs are zero', () => {
+    const timing: RunTiming = {
+      runId: 1,
+      billable: { UBUNTU: { totalMs: 0, jobs: 1, jobRuns: [] } },
+      runDurationMs: 0,
+    };
+
+    const result = effectiveOsMs(timing);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(['UBUNTU', 0]);
+  });
+
+  it('returns empty array when billable is empty', () => {
+    const timing: RunTiming = { runId: 1, billable: {} };
+    expect(effectiveOsMs(timing)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// estimatedMinutesForRun — fallback branch
+// ---------------------------------------------------------------------------
+
+describe('estimatedMinutesForRun', () => {
+  it('computes billed minutes from real totalMs (normal path)', () => {
+    // UBUNTU 120s = ceil(2) × 1 = 2 min
+    const t = makeRunTiming({ UBUNTU: { totalMs: 120_000, jobs: 1, jobRuns: [] } });
+    const run = makeAnnotatedRun({ timing: t });
+    expect(estimatedMinutesForRun(run)).toBe(2);
+  });
+
+  it('uses runDurationMs fallback when all totalMs are zero (deprecated endpoint)', () => {
+    // UBUNTU with total_ms=0, but run_duration_ms=120_000 → ceil(2)×1 = 2 min
+    const t: RunTiming = {
+      runId: 1,
+      billable: { UBUNTU: { totalMs: 0, jobs: 1, jobRuns: [] } },
+      runDurationMs: 120_000,
+    };
+    const run = makeAnnotatedRun({ timing: t });
+    expect(estimatedMinutesForRun(run)).toBe(2);
+  });
+
+  it('applies MACOS 10× multiplier through the fallback path', () => {
+    // MACOS with total_ms=0, run_duration_ms=60_000 → ceil(1)×10 = 10 min
+    const t: RunTiming = {
+      runId: 1,
+      billable: { MACOS: { totalMs: 0, jobs: 1, jobRuns: [] } },
+      runDurationMs: 60_000,
+    };
+    const run = makeAnnotatedRun({ timing: t });
+    expect(estimatedMinutesForRun(run)).toBe(10);
   });
 });

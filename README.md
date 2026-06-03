@@ -101,7 +101,7 @@ When `--by run` is active, a **By Run** section is appended:
 |---|---|
 | Repo / Workflow | Repository and workflow name |
 | Run ID | GitHub Actions run ID |
-| Duration | Total machine-time as `Xm YYs` (sum of billable ms across OS keys — can exceed wall-clock for parallel jobs) |
+| Duration | Wall-clock run duration as `Xm YYs` (from GitHub's `run_duration_ms`; OS multiplier is applied to estimate billed minutes) |
 | Billed min | Estimated billed minutes (OS multiplier applied) |
 | OS | Dominant OS for the run, with multiplier noted for macOS/Windows |
 

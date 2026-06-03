@@ -143,6 +143,11 @@ program.action(async (opts) => {
     console.error('Computing rollup...');
     const result = buildRollupResult({ billing, runs: annotatedRuns, config });
 
+    // 7a. Warn if --by run was requested but produced nothing (helps diagnose API changes)
+    if (config.by.has('run') && !config.noTiming && result.byRun.length === 0) {
+      console.error('⚠  --by run: no per-run timing data available for the selected window. The GitHub /timing endpoint may have been deprecated or no runs were found.');
+    }
+
     // 8. Print rate limit remaining
     try {
       const rl = await octokit.rest.rateLimit.get();
