@@ -27,7 +27,7 @@ function csvRow(fields: (string | number)[]): string {
  * as an approximation for workflow/job rows. Per-run rows use the run's own dominantOs.
  */
 export function renderCsv(result: RollupResult): string {
-  const headers = 'repo,workflow,job,os,rawMinApprox,multiplier,billedMin,runId,durationSec';
+  const headers = 'repo,workflow,job,os,rawMinApprox,multiplier,billedMin,runId,runStartedAt,durationSec';
   const rows: string[] = [headers];
 
   // Build a lookup from repo -> dominant OS for fallback columns
@@ -48,28 +48,28 @@ export function renderCsv(result: RollupResult): string {
       const mult = run.dominantOs ? MULTIPLIER[run.dominantOs] : 1;
       const rawMin = Math.round(run.rawMs / 60_000);
       const durationSec = Math.round(run.rawMs / 1_000);
-      rows.push(csvRow([run.repo, run.workflowName, '', os, rawMin, mult, run.billedMinutes, run.runId, durationSec]));
+      rows.push(csvRow([run.repo, run.workflowName, '', os, rawMin, mult, run.billedMinutes, run.runId, run.runStartedAt, durationSec]));
     }
   } else if (result.byJob.length > 0) {
     for (const job of result.byJob) {
       const os = repoOs.get(job.repo) ?? '';
       const mult = osMultiplier.get(os) ?? 1;
       const rawMin = mult > 0 ? Math.round(job.billedMinutes / mult) : job.billedMinutes;
-      rows.push(csvRow([job.repo, job.workflowName, job.jobName, os, rawMin, mult, job.billedMinutes, '', '']));
+      rows.push(csvRow([job.repo, job.workflowName, job.jobName, os, rawMin, mult, job.billedMinutes, '', '', '']));
     }
   } else if (result.byWorkflow.length > 0) {
     for (const wf of result.byWorkflow) {
       const os = repoOs.get(wf.repo) ?? '';
       const mult = osMultiplier.get(os) ?? 1;
       const rawMin = mult > 0 ? Math.round(wf.billedMinutes / mult) : wf.billedMinutes;
-      rows.push(csvRow([wf.repo, wf.workflowName, '', os, rawMin, mult, wf.billedMinutes, '', '']));
+      rows.push(csvRow([wf.repo, wf.workflowName, '', os, rawMin, mult, wf.billedMinutes, '', '', '']));
     }
   } else {
     for (const repo of result.byRepo) {
       const os = repo.dominantOs ?? '';
       const mult = osMultiplier.get(os) ?? 1;
       const rawMin = mult > 0 ? Math.round(repo.billedMinutes / mult) : repo.billedMinutes;
-      rows.push(csvRow([repo.repo, '', '', os, rawMin, mult, repo.billedMinutes, '', '']));
+      rows.push(csvRow([repo.repo, '', '', os, rawMin, mult, repo.billedMinutes, '', '', '']));
     }
   }
 

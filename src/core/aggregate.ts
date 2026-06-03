@@ -330,6 +330,7 @@ export function buildByRun(runs: AnnotatedRun[]): RunRollup[] {
       repo: run.repo,
       workflowName: run.workflowName,
       runId: run.runId,
+      runStartedAt: run.runStartedAt,
       rawMs,
       billedMinutes: estimatedMinutesForRun(run),
       dominantOs,

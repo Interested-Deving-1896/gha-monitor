@@ -48,6 +48,7 @@ function makeAnnotatedRun(overrides: Partial<AnnotatedRun> & { timing: RunTiming
     repo: 'myorg/myrepo',
     workflowName: 'CI',
     runId: overrides.timing.runId,
+    runStartedAt: '2024-03-01T00:00:00Z',
     ...overrides,
   };
 }
@@ -361,6 +362,7 @@ describe('apportionByJob', () => {
       repo: 'myorg/repo',
       workflowName: 'CI',
       runId: 999,
+      runStartedAt: '2024-03-01T00:00:00Z',
       timing,
       jobNames: new Map([[1, 'build'], [2, 'test']]),
     };
@@ -382,6 +384,7 @@ describe('apportionByJob', () => {
       repo: 'myorg/repo',
       workflowName: 'CI',
       runId: t.runId,
+      runStartedAt: '2024-03-01T00:00:00Z',
       timing: t,
       // no jobNames
     };
@@ -420,6 +423,7 @@ describe('apportionByJob', () => {
       repo: 'myorg/repo',
       workflowName: 'CI',
       runId: 1,
+      runStartedAt: '2024-03-01T00:00:00Z',
       timing,
       jobNames: new Map([[1, 'lint'], [2, 'build'], [3, 'test']]),
     };
@@ -666,14 +670,15 @@ describe('buildByRun', () => {
     expect(result[2].billedMinutes).toBe(1);
   });
 
-  it('preserves repo and runId on each RunRollup', () => {
+  it('preserves repo, runId, and runStartedAt on each RunRollup', () => {
     const t = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
-    const runs = [makeAnnotatedRun({ repo: 'myorg/my-repo', workflowName: 'CI', timing: t })];
+    const runs = [makeAnnotatedRun({ repo: 'myorg/my-repo', workflowName: 'CI', timing: t, runStartedAt: '2024-05-15T10:30:00Z' })];
 
     const result = buildByRun(runs);
 
     expect(result[0].repo).toBe('myorg/my-repo');
     expect(result[0].runId).toBe(t.runId);
+    expect(result[0].runStartedAt).toBe('2024-05-15T10:30:00Z');
   });
 
   it('returns empty array for empty input', () => {

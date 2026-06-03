@@ -37,6 +37,7 @@ export interface AnnotatedRun {
   repo: string;           // full_name e.g. "myorg/myrepo"
   workflowName: string;
   runId: number;
+  runStartedAt: string;   // ISO timestamp when execution began
   timing: RunTiming;
   jobNames?: Map<number, string>; // jobId -> name, only populated when --by job
 }
@@ -72,6 +73,8 @@ export interface RunRollup {
   repo: string;
   workflowName: string;
   runId: number;
+  /** ISO timestamp when the run began executing (run_started_at, falls back to created_at). */
+  runStartedAt: string;
   /** Effective total ms (wall-clock run duration when billing totals are zero). */
   rawMs: number;
   /** Estimated billed minutes: ceil(ms/60000)*MULTIPLIER per OS, summed. */

@@ -6,6 +6,7 @@ export interface WorkflowRun {
   workflowId: number;
   headBranch: string | null;
   createdAt: string;           // ISO timestamp
+  runStartedAt: string;        // ISO timestamp when execution began (falls back to createdAt)
   status: string | null;
   conclusion: string | null;
 }
@@ -32,6 +33,7 @@ export async function listRuns(
     workflowId: r.workflow_id,
     headBranch: r.head_branch ?? null,
     createdAt: r.created_at,
+    runStartedAt: (r as { run_started_at?: string | null }).run_started_at ?? r.created_at,
     status: r.status ?? null,
     conclusion: r.conclusion ?? null,
   }));

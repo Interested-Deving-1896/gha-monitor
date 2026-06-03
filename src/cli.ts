@@ -132,6 +132,7 @@ program.action(async (opts) => {
             repo: fullName,
             workflowName: run.name ?? 'unknown',
             runId: run.id,
+            runStartedAt: run.runStartedAt,
             timing,
             jobNames,
           });

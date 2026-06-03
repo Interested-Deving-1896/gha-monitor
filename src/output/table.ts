@@ -170,11 +170,13 @@ export function renderTable(result: RollupResult, quota: number, runDisplayLimit
     lines.push(sectionHeader('By Run  (wall-clock run duration, OS multiplier applied)'));
     const runLabelColW = 44;
     const runIdColW = 12;
+    const startedColW = 22;
     lines.push(
       '  ' +
       col('#', 4) +
       col('Repo / Workflow', runLabelColW) +
       col('Run ID', runIdColW, true) +
+      col('Started (UTC)', startedColW, true) +
       col('Duration', 10, true) +
       col('Billed min', 12, true) +
       col('OS', 8),
@@ -189,6 +191,7 @@ export function renderTable(result: RollupResult, quota: number, runDisplayLimit
         col(i + 1, 4) +
         col(label, runLabelColW) +
         col(row.runId, runIdColW, true) +
+        col(row.runStartedAt, startedColW, true) +
         col(formatDuration(row.rawMs), 10, true) +
         col(Math.round(row.billedMinutes), 12, true) +
         '  ' + (row.dominantOs ?? '-') + (mult > 1 ? ` (${mult}×)` : ''),
