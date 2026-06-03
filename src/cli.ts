@@ -1,6 +1,6 @@
-import 'dotenv/config';
 import { config as dotenvLocal } from 'dotenv';
-dotenvLocal({ path: '.env.local', override: true });
+dotenvLocal({ quiet: true });
+dotenvLocal({ path: '.env.local', override: true, quiet: true });
 
 import { program } from 'commander';
 import pLimit from 'p-limit';

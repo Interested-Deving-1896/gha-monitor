@@ -15,7 +15,7 @@ function csvRow(fields: (string | number)[]): string {
 }
 
 /**
- * One row per leaf entry. Headers: repo,workflow,job,os,rawMinApprox,multiplier,billedMin,runId,durationSec
+ * One row per leaf entry. Headers: repo,workflow,job,os,rawMinApprox,multiplier,billedMin,runId,runStartedAt,durationSec
  *
  * Priority:
  * 1. If byRun is populated  → one row per run (runId and durationSec filled).
