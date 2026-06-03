@@ -3,9 +3,18 @@
   "version": "0.1.0",
   "description": "GitHub Actions usage insights CLI — by repo, workflow, job, and runner OS",
   "type": "module",
-  "engines": { "node": ">=20", "npm": ">=7" },
-  "bin": { "gha-monitor": "bin/gha-monitor.js" },
-  "files": ["dist", "bin", "README.md"],
+  "engines": {
+    "node": ">=20",
+    "npm": ">=7"
+  },
+  "bin": {
+    "gha-monitor": "bin/gha-monitor.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
@@ -14,16 +23,17 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@octokit/rest": "^21.0.0",
-    "@octokit/plugin-throttling": "^9.0.0",
     "@octokit/plugin-retry": "^7.0.0",
-    "p-limit": "^6.0.0",
-    "commander": "^12.0.0"
+    "@octokit/plugin-throttling": "^9.0.0",
+    "@octokit/rest": "^21.0.0",
+    "commander": "^12.0.0",
+    "dotenv": "^17.4.2",
+    "p-limit": "^6.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",
+    "typescript": "^5.4.0",
     "vitest": "^1.0.0"
   }
 }

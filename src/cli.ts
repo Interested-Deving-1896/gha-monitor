@@ -1,3 +1,7 @@
+import 'dotenv/config';
+import { config as dotenvLocal } from 'dotenv';
+dotenvLocal({ path: '.env.local', override: true });
+
 import { program } from 'commander';
 import pLimit from 'p-limit';
 import { resolveConfig } from './config.js';
