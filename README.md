@@ -1,6 +1,6 @@
 # gha-monitor
 
-GitHub Actions usage insights CLI — analyze billable minutes by repo, workflow, job, and runner OS.
+GitHub Actions usage insights CLI — analyze billable minutes by repo, workflow, job, run, and runner OS.
 
 ## What it does
 
@@ -9,6 +9,7 @@ GitHub Actions usage insights CLI — analyze billable minutes by repo, workflow
 - Repository
 - Workflow
 - Job
+- Individual run (duration + billed minutes per run)
 - Runner OS (Linux, macOS, Windows) — with billing multipliers applied
 
 Results can be output as a formatted table (default), JSON, or CSV for further analysis.
@@ -65,11 +66,20 @@ node dist/cli.js --org my-org --top 1
 # Break down by workflow
 node dist/cli.js --org my-org --by workflow
 
-# Output as JSON
-node dist/cli.js --org my-org --json
+# Show individual run durations and billed minutes (top 20 by default)
+node dist/cli.js --org my-org --by run
 
-# Output as CSV
-node dist/cli.js --org my-org --csv
+# Show up to 50 runs
+node dist/cli.js --org my-org --by run --top 50
+
+# Show all runs (no cap)
+node dist/cli.js --org my-org --by run --top all
+
+# Output as JSON (byRun array always uncapped)
+node dist/cli.js --org my-org --by run --json
+
+# Output as CSV with runId and durationSec columns
+node dist/cli.js --org my-org --by run --csv
 ```
 
 > **Dev shortcut:** replace `node dist/cli.js` with `npm run dev --` to run via tsx without a build step.
@@ -83,8 +93,19 @@ The default table output shows:
 | Repo | Repository name |
 | Workflow | Workflow file name |
 | OS | Runner OS (ubuntu, macos, windows) |
-| Runs | Number of completed runs in the window |
 | Minutes | Total billable minutes (with OS multiplier applied) |
+
+When `--by run` is active, a **By Run** section is appended:
+
+| Column | Description |
+|---|---|
+| Repo / Workflow | Repository and workflow name |
+| Run ID | GitHub Actions run ID |
+| Duration | Total machine-time as `Xm YYs` (sum of billable ms across OS keys — can exceed wall-clock for parallel jobs) |
+| Billed min | Estimated billed minutes (OS multiplier applied) |
+| OS | Dominant OS for the run, with multiplier noted for macOS/Windows |
+
+The table shows up to 20 runs by default; use `--top N` or `--top all` to change the cap. JSON and CSV always include the full uncapped list. The CSV adds `runId` and `durationSec` columns (whole seconds, floored).
 
 ## License
 

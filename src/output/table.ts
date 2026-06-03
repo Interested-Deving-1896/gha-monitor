@@ -1,7 +1,16 @@
 import type { RollupResult } from '../core/types.js';
 import { daysInMonth } from '../core/window.js';
+import { MULTIPLIER } from '../core/multipliers.js';
 
 const RULER_WIDTH = 55; // total line width
+
+/** Format milliseconds as "Xm YYs" (e.g. 154000 → "2m 34s"). Floors to whole seconds. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
 
 function ruler(char: string): string {
   return char.repeat(RULER_WIDTH);
@@ -41,9 +50,9 @@ function col(value: string | number, width: number, right = false): string {
   return right ? s.padStart(width) : s.padEnd(width);
 }
 
-export function renderTable(result: RollupResult, quota: number): string {
+export function renderTable(result: RollupResult, quota: number, runDisplayLimit = 20): string {
   const lines: string[] = [];
-  const { org, window: win, totalBilledMinutes, byOs, byRepo, byWorkflow, byJob, reconciliation, source } = result;
+  const { org, window: win, totalBilledMinutes, byOs, byRepo, byWorkflow, byJob, byRun, reconciliation, source } = result;
   const dim = daysInMonth(win.year, win.month);
 
   // ── Headline ─────────────────────────────────────────
@@ -152,6 +161,41 @@ export function renderTable(result: RollupResult, quota: number): string {
       const row = topJobs[i];
       const label = `${row.repo} / ${row.workflowName} / ${row.jobName}`;
       lines.push('  ' + col(i + 1, 4) + col(label, jobColW) + col(Math.round(row.billedMinutes), 12, true));
+    }
+    lines.push('');
+  }
+
+  // ── By Run ───────────────────────────────────────────────
+  if (byRun.length > 0) {
+    lines.push(sectionHeader('By Run  (timing estimate — machine-time, not wall-clock)'));
+    const runLabelColW = 44;
+    const runIdColW = 12;
+    lines.push(
+      '  ' +
+      col('#', 4) +
+      col('Repo / Workflow', runLabelColW) +
+      col('Run ID', runIdColW, true) +
+      col('Duration', 10, true) +
+      col('Billed min', 12, true) +
+      col('OS', 8),
+    );
+    const visibleRuns = runDisplayLimit === Infinity ? byRun : byRun.slice(0, runDisplayLimit);
+    for (let i = 0; i < visibleRuns.length; i++) {
+      const row = visibleRuns[i];
+      const label = `${row.repo} / ${row.workflowName}`;
+      const mult = row.dominantOs ? MULTIPLIER[row.dominantOs] : 1;
+      lines.push(
+        '  ' +
+        col(i + 1, 4) +
+        col(label, runLabelColW) +
+        col(row.runId, runIdColW, true) +
+        col(formatDuration(row.rawMs), 10, true) +
+        col(Math.round(row.billedMinutes), 12, true) +
+        '  ' + (row.dominantOs ?? '-') + (mult > 1 ? ` (${mult}×)` : ''),
+      );
+    }
+    if (byRun.length > visibleRuns.length) {
+      lines.push(`  … ${byRun.length - visibleRuns.length} more runs (use --top all to see all)`);
     }
     lines.push('');
   }

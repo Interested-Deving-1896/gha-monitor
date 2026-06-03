@@ -65,6 +65,17 @@ export interface JobRollup {
   billedMinutes: number;
 }
 
+export interface RunRollup {
+  repo: string;
+  workflowName: string;
+  runId: number;
+  /** Sum of OsTiming.totalMs across all OS keys — total machine-time, not wall-clock. */
+  rawMs: number;
+  /** Estimated billed minutes: ceil(ms/60000)*MULTIPLIER per OS, summed. */
+  billedMinutes: number;
+  dominantOs: OsKey | null;
+}
+
 export interface ReconciliationInfo {
   repo: string;
   billingMinutes: number;
@@ -81,6 +92,7 @@ export interface RollupResult {
   byOs: OsRollup[];
   byWorkflow: WorkflowRollup[];
   byJob: JobRollup[];
+  byRun: RunRollup[];
   reconciliation: ReconciliationInfo[];
   source: 'billing' | 'timing-estimated' | 'mixed';
 }
@@ -94,7 +106,7 @@ export interface TimeWindow {
   daysInWindow: number;    // number of calendar days in the window
 }
 
-export type GroupByValue = 'repo' | 'workflow' | 'job' | 'os';
+export type GroupByValue = 'repo' | 'workflow' | 'job' | 'os' | 'run';
 export type SourceValue = 'billing' | 'timing' | 'auto';
 export type OutputFormat = 'table' | 'json' | 'csv';
 

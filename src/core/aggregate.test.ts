@@ -8,6 +8,7 @@ import {
   apportionByWorkflow,
   apportionByJob,
   buildRollupResult,
+  buildByRun,
 } from './aggregate.js';
 import type { BillingResult } from '../github/billing.js';
 
@@ -546,5 +547,134 @@ describe('buildRollupResult', () => {
     expect(result.reconciliation[0].billingMinutes).toBe(100);
     expect(result.reconciliation[0].timingMinutes).toBe(1);
     expect(result.reconciliation[0].ratio).toBeCloseTo(0.01, 3);
+  });
+
+  it('byRun is empty when config.by does not include "run"', () => {
+    const billing: BillingResult = { available: false, items: [] };
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+    ];
+    const result = buildRollupResult({ billing, runs, config: { ...baseConfig, by: new Set(['repo']) } });
+    expect(result.byRun).toEqual([]);
+  });
+
+  it('byRun is populated when config.by includes "run"', () => {
+    const billing: BillingResult = { available: false, items: [] };
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs: AnnotatedRun[] = [
+      makeAnnotatedRun({ repo: 'myorg/repoA', workflowName: 'CI', timing: t1 }),
+    ];
+    const result = buildRollupResult({ billing, runs, config: { ...baseConfig, by: new Set(['run']) } });
+    expect(result.byRun).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildByRun
+// ---------------------------------------------------------------------------
+
+describe('buildByRun', () => {
+  it('computes rawMs as sum of totalMs across all OS keys', () => {
+    const t = makeRunTiming({
+      UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] },
+      MACOS:  { totalMs: 30_000, jobs: 1, jobRuns: [] },
+    });
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].rawMs).toBe(90_000);
+  });
+
+  it('computes billedMinutes using OS multipliers (MACOS = 10×)', () => {
+    // MACOS 60s = ceil(60000/60000) * 10 = 10 min
+    const t = makeRunTiming({ MACOS: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    expect(result[0].billedMinutes).toBe(10);
+  });
+
+  it('computes billedMinutes across multiple OS keys in one run', () => {
+    // UBUNTU 120s = ceil(2)*1 = 2 min; WINDOWS 60s = ceil(1)*2 = 2 min → 4 min total
+    const t = makeRunTiming({
+      UBUNTU:  { totalMs: 120_000, jobs: 1, jobRuns: [] },
+      WINDOWS: { totalMs: 60_000,  jobs: 1, jobRuns: [] },
+    });
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    expect(result[0].billedMinutes).toBe(4);
+  });
+
+  it('sets dominantOs to the OS with the largest totalMs', () => {
+    const t = makeRunTiming({
+      UBUNTU: { totalMs: 10_000, jobs: 1, jobRuns: [] },
+      MACOS:  { totalMs: 60_000, jobs: 1, jobRuns: [] },
+    });
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    expect(result[0].dominantOs).toBe('MACOS');
+  });
+
+  it('sets dominantOs to null when timing.billable is empty', () => {
+    const t = makeRunTiming({});
+    const runs = [makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    // Zero-timing run should be excluded entirely
+    expect(result).toHaveLength(0);
+  });
+
+  it('excludes runs with rawMs === 0 (no timing data)', () => {
+    const tEmpty = makeRunTiming({});
+    const tReal  = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI', timing: tEmpty }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'Deploy', timing: tReal }),
+    ];
+
+    const result = buildByRun(runs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].workflowName).toBe('Deploy');
+  });
+
+  it('sorts descending by billedMinutes', () => {
+    const t1 = makeRunTiming({ UBUNTU: { totalMs: 60_000,  jobs: 1, jobRuns: [] } }); // 1 min
+    const t2 = makeRunTiming({ UBUNTU: { totalMs: 300_000, jobs: 1, jobRuns: [] } }); // 5 min
+    const t3 = makeRunTiming({ UBUNTU: { totalMs: 120_000, jobs: 1, jobRuns: [] } }); // 2 min
+    const runs = [
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'CI',     timing: t1 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'Deploy', timing: t2 }),
+      makeAnnotatedRun({ repo: 'myorg/repo', workflowName: 'Lint',   timing: t3 }),
+    ];
+
+    const result = buildByRun(runs);
+
+    expect(result[0].billedMinutes).toBe(5);
+    expect(result[1].billedMinutes).toBe(2);
+    expect(result[2].billedMinutes).toBe(1);
+  });
+
+  it('preserves repo and runId on each RunRollup', () => {
+    const t = makeRunTiming({ UBUNTU: { totalMs: 60_000, jobs: 1, jobRuns: [] } });
+    const runs = [makeAnnotatedRun({ repo: 'myorg/my-repo', workflowName: 'CI', timing: t })];
+
+    const result = buildByRun(runs);
+
+    expect(result[0].repo).toBe('myorg/my-repo');
+    expect(result[0].runId).toBe(t.runId);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(buildByRun([])).toEqual([]);
   });
 });

@@ -17,7 +17,7 @@ export interface CliOpts {
   quota?: number;
 }
 
-const VALID_GROUP_BY = new Set(['repo', 'workflow', 'job', 'os'] as const);
+const VALID_GROUP_BY = new Set(['repo', 'workflow', 'job', 'os', 'run'] as const);
 
 const VALID_SOURCES = new Set(['billing', 'timing', 'auto'] as const);
 

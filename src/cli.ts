@@ -16,16 +16,24 @@ import { renderJson } from './output/json.js';
 import { renderCsv } from './output/csv.js';
 import type { AnnotatedRun } from './core/types.js';
 
+/** Parse --top: accepts a positive integer or "all" (case-insensitive) → Infinity. */
+function parseTop(v: string): number {
+  if (v.toLowerCase() === 'all') return Infinity;
+  const n = parseInt(v, 10);
+  if (isNaN(n) || n < 1) throw new Error(`--top must be a positive integer or "all". Got: "${v}".`);
+  return n;
+}
+
 program
   .name('gha-monitor')
-  .description('GitHub Actions usage insights — by repo, workflow, job, and runner OS')
+  .description('GitHub Actions usage insights — by repo, workflow, job, run, and runner OS')
   .version('0.1.0')
   .requiredOption('--org <name>', 'GitHub organization name')
   .option('--days <n>', 'rolling window in days (default: 7)', parseInt)
   .option('--month <m>', 'calendar month (1-12), requires --year', parseInt)
   .option('--year <y>', 'calendar year, requires --month', parseInt)
-  .option('--by <dims>', 'dimensions: comma-separated repo,workflow,job,os (default: repo,os)')
-  .option('--top <n>', 'limit timing drill-down to top N repos (default: 10)', parseInt)
+  .option('--by <dims>', 'dimensions: comma-separated repo,workflow,job,os,run (default: repo,os)')
+  .option('--top <n>', 'top N repos for timing drill-down; also caps By-Run rows (default: 10, "all" = no cap)', parseTop)
   .option('--source <s>', 'data source: billing|timing|auto (default: auto)')
   .option('--no-timing', 'skip per-run timing fan-out (billing only)')
   .option('--concurrency <n>', 'API concurrency limit (default: 8)', parseInt)
@@ -44,6 +52,8 @@ program.action(async (opts) => {
     };
     const config = resolveConfig(resolvedOpts);
     const quota = opts.quota as number;
+    // runDisplayLimit: honour explicit --top (including "all"→Infinity), default 20 when not passed
+    const runDisplayLimit: number = opts.top !== undefined ? config.top : 20;
 
     // 2. createClient
     const octokit = createClient(config.token);
@@ -150,7 +160,7 @@ program.action(async (opts) => {
     } else if (config.outputFormat === 'csv') {
       output = renderCsv(result);
     } else {
-      output = renderTable(result, quota);
+      output = renderTable(result, quota, runDisplayLimit);
     }
 
     process.stdout.write(output);

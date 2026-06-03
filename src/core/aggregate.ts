@@ -1,4 +1,4 @@
-import type { LineItem, AnnotatedRun, OsKey, RepoRollup, OsRollup, WorkflowRollup, JobRollup, ReconciliationInfo, RollupResult, Config } from './types.js';
+import type { LineItem, AnnotatedRun, OsKey, RepoRollup, OsRollup, WorkflowRollup, JobRollup, RunRollup, ReconciliationInfo, RollupResult, Config } from './types.js';
 import { billedMinutes, skuToOsKey, MULTIPLIER } from './multipliers.js';
 import type { BillingResult } from '../github/billing.js';
 
@@ -122,7 +122,7 @@ export function computeTimingByRepo(runs: AnnotatedRun[]): Map<string, number> {
 }
 
 /** Sum estimated billed minutes for a single run across all OS keys. */
-function estimatedMinutesForRun(run: AnnotatedRun): number {
+export function estimatedMinutesForRun(run: AnnotatedRun): number {
   let total = 0;
   for (const [os, timing] of Object.entries(run.timing.billable) as [OsKey, { totalMs: number }][]) {
     total += billedMinutes(os, timing.totalMs);
@@ -258,6 +258,50 @@ export function apportionByJob(runs: AnnotatedRun[], workflowBilledMinutes: numb
 }
 
 // ---------------------------------------------------------------------------
+// buildByRun
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a per-run summary from AnnotatedRun[].
+ * rawMs = sum of OsTiming.totalMs across all OS keys (machine-time, not wall-clock).
+ * billedMinutes = estimatedMinutesForRun (ceil-per-OS with multiplier).
+ * dominantOs = OS key with the largest totalMs.
+ * Runs with rawMs === 0 (no timing data) are excluded.
+ * Returns sorted descending by billedMinutes. Full list — callers slice as needed.
+ */
+export function buildByRun(runs: AnnotatedRun[]): RunRollup[] {
+  const rollups: RunRollup[] = [];
+
+  for (const run of runs) {
+    let rawMs = 0;
+    let dominantOs: OsKey | null = null;
+    let maxMs = -1;
+
+    for (const [os, timing] of Object.entries(run.timing.billable) as [OsKey, { totalMs: number }][]) {
+      rawMs += timing.totalMs;
+      if (timing.totalMs > maxMs) {
+        maxMs = timing.totalMs;
+        dominantOs = os;
+      }
+    }
+
+    if (rawMs === 0) continue; // no timing data — skip
+
+    rollups.push({
+      repo: run.repo,
+      workflowName: run.workflowName,
+      runId: run.runId,
+      rawMs,
+      billedMinutes: estimatedMinutesForRun(run),
+      dominantOs,
+    });
+  }
+
+  rollups.sort((a, b) => b.billedMinutes - a.billedMinutes);
+  return rollups;
+}
+
+// ---------------------------------------------------------------------------
 // buildRollupResult
 // ---------------------------------------------------------------------------
 
@@ -310,6 +354,9 @@ export function buildRollupResult(params: {
   // Fix 6: compute timingByRepo once and reuse for reconciliation
   const timingByRepo = computeTimingByRepo(runs);
 
+  // Build per-run rollups when requested
+  const byRun: RunRollup[] = config.by.has('run') ? buildByRun(runs) : [];
+
   // Build workflow/job rollups per repo
   const byWorkflow: WorkflowRollup[] = [];
   const byJob: JobRollup[] = [];
@@ -358,6 +405,7 @@ export function buildRollupResult(params: {
     byOs,
     byWorkflow,
     byJob,
+    byRun,
     reconciliation,
     source,
   };

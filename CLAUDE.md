@@ -70,11 +70,15 @@ Order of operations:
 
 ### `--by` flag controls both API calls and output sections
 
-`config.by` is a `Set<'repo' | 'workflow' | 'job' | 'os'>`. In `buildRollupResult`, `wantWorkflow = by.has('workflow') || by.has('job')` gates whether `apportionByWorkflow` is called. In `cli.ts`, `by.has('job')` gates whether `fetchJobNames` is called per run.
+`config.by` is a `Set<'repo' | 'workflow' | 'job' | 'os' | 'run'>`. In `buildRollupResult`, `wantWorkflow = by.has('workflow') || by.has('job')` gates whether `apportionByWorkflow` is called. In `cli.ts`, `by.has('job')` gates whether `fetchJobNames` is called per run. `by.has('run')` gates `buildByRun` in `buildRollupResult`; it requires no extra API calls since timing is already fetched.
+
+`byRun` is **timing-only** (no billing data exists per run) — it is not apportioned from the billing total. `RunRollup.billedMinutes` = `estimatedMinutesForRun` (the same per-OS ceil×multiplier estimate used for reconciliation). Runs with no timing data (`rawMs === 0`) are excluded.
+
+`--top` controls two things: how many repos are drilled into for timing (existing behaviour) and, when `--by run` is active, how many run rows appear in the table (default 20 when `--top` is omitted, `Infinity` for `--top all`). JSON and CSV always emit the full `byRun` array uncapped.
 
 ### Output (`output/`)
 
-Three pure formatters take `RollupResult` and return a string. The `--by` set controls which sections appear in the table. CSV uses a fallback hierarchy: `byJob → byWorkflow → byRepo`. The `rawMinApprox` and `multiplier` columns in CSV use the repo's dominant OS as an approximation for workflow/job rows (data model limitation — `WorkflowRollup`/`JobRollup` carry no `os` field).
+Three pure formatters take `RollupResult` and return a string. The `--by` set controls which sections appear in the table. CSV uses a fallback hierarchy: `byRun → byJob → byWorkflow → byRepo`. Per-run CSV rows include `runId` and `durationSec` (whole seconds, floored); all other rows leave those columns empty. The `rawMinApprox` and `multiplier` columns in CSV use the repo's dominant OS as an approximation for workflow/job rows (data model limitation — `WorkflowRollup`/`JobRollup` carry no `os` field); per-run rows use the run's own `dominantOs`.
 
 ## Testing
 
