@@ -2,6 +2,7 @@
   "name": "gha-monitor",
   "version": "0.1.0",
   "description": "GitHub Actions usage insights CLI — by repo, workflow, job, and runner OS",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20",
