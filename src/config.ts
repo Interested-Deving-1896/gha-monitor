@@ -1,4 +1,4 @@
-import type { Config } from './core/types.js';
+import type { Config, GroupByValue, SourceValue, OutputFormat } from './core/types.js';
 import { resolveWindow } from './core/window.js';
 
 export interface CliOpts {
@@ -17,10 +17,8 @@ export interface CliOpts {
 }
 
 const VALID_GROUP_BY = new Set(['repo', 'workflow', 'job', 'os'] as const);
-type GroupByValue = 'repo' | 'workflow' | 'job' | 'os';
 
 const VALID_SOURCES = new Set(['billing', 'timing', 'auto'] as const);
-type SourceValue = 'billing' | 'timing' | 'auto';
 
 /**
  * Resolve and validate all CLI options into a Config object.
@@ -46,12 +44,31 @@ export function resolveConfig(opts: CliOpts): Config {
   }
   const org = opts.org;
 
-  // 3. Validate --days and --month/--year are mutually exclusive
+  // 3. Validate --month and --year must be used together
+  if (opts.month !== undefined && opts.year === undefined) {
+    throw new Error('--month requires --year. Example: --month 3 --year 2024');
+  }
+  if (opts.year !== undefined && opts.month === undefined) {
+    throw new Error('--year requires --month. Example: --month 3 --year 2024');
+  }
+
+  // 3b. Validate --days and --month/--year are mutually exclusive
   const hasDays = opts.days !== undefined;
   const hasMonth = opts.month !== undefined || opts.year !== undefined;
 
   if (hasDays && hasMonth) {
     throw new Error('--days and --month/--year are mutually exclusive.');
+  }
+
+  // 3c. Numeric range validation
+  if (opts.days !== undefined && (opts.days < 1 || !Number.isInteger(opts.days))) {
+    throw new Error('--days must be a positive integer.');
+  }
+  if (opts.month !== undefined && (opts.month < 1 || opts.month > 12)) {
+    throw new Error('--month must be between 1 and 12.');
+  }
+  if (opts.year !== undefined && opts.year < 2000) {
+    throw new Error('--year seems invalid. Expected a 4-digit year (e.g. 2024).');
   }
 
   // 4. Validate --source
@@ -82,14 +99,14 @@ export function resolveConfig(opts: CliOpts): Config {
   if (opts.json && opts.csv) {
     throw new Error('--json and --csv are mutually exclusive.');
   }
-  const outputFormat: 'table' | 'json' | 'csv' = opts.json
+  const outputFormat: OutputFormat = opts.json
     ? 'json'
     : opts.csv
       ? 'csv'
       : 'table';
 
   // 7. Resolve the time window
-  const window = resolveWindow({
+  const timeWindow = resolveWindow({
     days: opts.days,
     month: opts.month,
     year: opts.year,
@@ -99,7 +116,7 @@ export function resolveConfig(opts: CliOpts): Config {
   return {
     token,
     org,
-    window,
+    window: timeWindow,
     by: groupBy,
     top: opts.top ?? 10,
     source,

@@ -93,14 +93,18 @@ export interface TimeWindow {
   daysInWindow: number;    // number of calendar days in the window
 }
 
+export type GroupByValue = 'repo' | 'workflow' | 'job' | 'os';
+export type SourceValue = 'billing' | 'timing' | 'auto';
+export type OutputFormat = 'table' | 'json' | 'csv';
+
 export interface Config {
   org: string;
   token: string;
   window: TimeWindow;
-  by: Set<'repo' | 'workflow' | 'job' | 'os'>;
+  by: Set<GroupByValue>;
   top: number;
-  source: 'billing' | 'timing' | 'auto';
+  source: SourceValue;
   noTiming: boolean;
   concurrency: number;
-  outputFormat: 'table' | 'json' | 'csv';
+  outputFormat: OutputFormat;
 }

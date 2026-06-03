@@ -2,12 +2,9 @@ import { Octokit } from '@octokit/rest';
 import { throttling } from '@octokit/plugin-throttling';
 import { retry } from '@octokit/plugin-retry';
 
-// Augmented Octokit class with throttling and retry plugins.
-// The type is computed inline so TypeScript doesn't need to name it at module
-// level — which would require importing from deep node_modules paths.
-function buildOctokitClass() {
-  return Octokit.plugin(throttling, retry);
-}
+// Augmented Octokit class with throttling and retry plugins, built once at
+// module level so the class is not reconstructed on every createClient() call.
+const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
 /**
  * Create an authenticated Octokit instance with throttling and retry.
@@ -19,7 +16,6 @@ function buildOctokitClass() {
  * boolean the runtime needs.
  */
 export function createClient(token: string): Octokit {
-  const ThrottledOctokit = buildOctokitClass();
   return new ThrottledOctokit({
     auth: token,
     throttle: {
@@ -39,5 +35,5 @@ export function createClient(token: string): Octokit {
   });
 }
 
-/** The Octokit instance type returned by {@link createClient}. */
+/** Use this type to annotate parameters that accept a GitHub API client. */
 export type OctokitClient = Octokit;
