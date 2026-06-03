@@ -20,11 +20,14 @@ Results can be output as a formatted table (default), JSON, or CSV for further a
   - Classic PAT: `repo` + `manage_billing:org` (billing API) + `read:org` (list org repos and runs)
   - Fine-grained alternative: org Administration: read + Actions: read + Billing: read
 
-Set your token via the `GITHUB_TOKEN` environment variable:
+Set your token in `.env.local` (gitignored, never committed):
 
 ```sh
-export GITHUB_TOKEN=ghp_your_token_here
+cp .env .env.local
+# then edit .env.local and set GH_TOKEN=ghp_your_token_here
 ```
+
+`.env` is a committed example file with placeholder values. `.env.local` overrides it with your real token. You can also pass the token directly with `--token` or via the `GH_TOKEN` / `GITHUB_TOKEN` environment variable.
 
 ## Installation
 
