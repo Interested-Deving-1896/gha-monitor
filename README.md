@@ -18,7 +18,7 @@ Results can be output as a formatted table (default), JSON, or CSV for further a
 - **Node.js 20+**
 - **GitHub Personal Access Token (PAT)** with the following scopes:
   - `repo` — read access to repositories and workflow runs
-  - `admin:org` — read access to organization billing data
+  - `read:org` — read access to organization billing data
 
 Set your token via the `GITHUB_TOKEN` environment variable:
 

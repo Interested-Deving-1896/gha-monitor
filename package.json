@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "description": "GitHub Actions usage insights CLI — by repo, workflow, job, and runner OS",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=20", "npm": ">=7" },
   "bin": { "gha-monitor": "bin/gha-monitor.js" },
+  "files": ["dist", "bin", "README.md"],
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "dev": "tsx src/cli.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest"
