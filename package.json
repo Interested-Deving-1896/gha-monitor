@@ -1,0 +1,27 @@
+{
+  "name": "gha-monitor",
+  "version": "0.1.0",
+  "description": "GitHub Actions usage insights CLI — by repo, workflow, job, and runner OS",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "gha-monitor": "bin/gha-monitor.js" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.0",
+    "@octokit/plugin-throttling": "^9.0.0",
+    "@octokit/plugin-retry": "^7.0.0",
+    "p-limit": "^6.0.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "vitest": "^1.0.0"
+  }
+}
