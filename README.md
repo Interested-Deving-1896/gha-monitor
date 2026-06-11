@@ -1,54 +1,29 @@
+[update-readmes]   Mode: rewrite — migrating to template structure...
 # gha-monitor
 
-GitHub Actions usage insights CLI — analyze billable minutes by repo, workflow, job, run, and runner OS.
+[![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/gha-monitor)
 
-## What it does
+<!-- AI:start:what-it-does -->
+_Description pending._
+<!-- AI:end:what-it-does -->
 
-`gha-monitor` queries the GitHub API to surface GitHub Actions usage data across your organization or repositories. It aggregates billable minutes broken down by:
+## Architecture
 
-- Repository
-- Workflow
-- Job
-- Individual run (duration + billed minutes per run)
-- Runner OS (Linux, macOS, Windows) — with billing multipliers applied
+<!-- AI:start:architecture -->
+_Architecture documentation pending._
+<!-- AI:end:architecture -->
 
-Results can be output as a formatted table (default), JSON, or CSV for further analysis.
+## Install
 
-## Prerequisites
+<!-- Add installation instructions here. This section is yours — the AI will not modify it. -->
 
-- **Node.js 20+**
-- **GitHub Personal Access Token (PAT)** with the following scopes:
-  - Classic PAT: `repo` + `manage_billing:org` (billing API) + `read:org` (list org repos and runs)
-  - Fine-grained alternative: org Administration: read + Actions: read + Billing: read
-
-Set your token in `.env.local` (gitignored, never committed):
-
-```sh
-cp .env .env.local
-# then edit .env.local and set GH_TOKEN=ghp_your_token_here
-```
-
-`.env` is a committed example file with placeholder values. `.env.local` overrides it with your real token. You can also pass the token directly with `--token` or via the `GH_TOKEN` / `GITHUB_TOKEN` environment variable.
-
-## Installation
-
-Clone the repo and install dependencies. The `prepare` script compiles TypeScript to `dist/` automatically on install:
-
-```sh
-git clone <repo-url> gha-monitor
+```bash
+git clone https://github.com/Interested-Deving-1896/gha-monitor.git
 cd gha-monitor
-npm install
-```
-
-Then run the CLI from the repo directory (so `.env.local` is picked up):
-
-```sh
-node dist/cli.js --org my-org
-# or, without a build step, during development:
-npm run dev -- --org my-org
 ```
 
 ## Usage
+
 
 ```sh
 # Analyze an entire organization (last 7 days by default)
@@ -84,29 +59,50 @@ node dist/cli.js --org my-org --by run --csv
 
 > **Dev shortcut:** replace `node dist/cli.js` with `npm run dev --` to run via tsx without a build step.
 
-## Output
+## Configuration
 
-The default table output shows:
+<!-- Document configuration options here. This section is yours — the AI will not modify it. -->
 
-| Column | Description |
-|---|---|
-| Repo | Repository name |
-| Workflow | Workflow file name |
-| OS | Runner OS (ubuntu, macos, windows) |
-| Minutes | Total billable minutes (with OS multiplier applied) |
+## CI
 
-When `--by run` is active, a **By Run** section is appended:
+<!-- AI:start:ci -->
+_CI documentation pending._
+<!-- AI:end:ci -->
 
-| Column | Description |
-|---|---|
-| Repo / Workflow | Repository and workflow name |
-| Run ID | GitHub Actions run ID |
-| Duration | Wall-clock run duration as `Xm YYs` (from GitHub's `run_duration_ms`; OS multiplier is applied to estimate billed minutes) |
-| Billed min | Estimated billed minutes (OS multiplier applied) |
-| OS | Dominant OS for the run, with multiplier noted for macOS/Windows |
+## Mirror chain
 
-The table shows up to 20 runs by default; use `--top N` or `--top all` to change the cap. JSON and CSV always include the full uncapped list. The CSV adds `runId` and `durationSec` columns (whole seconds, floored).
+<!-- AI:start:mirror-chain -->
+This repo is maintained in [`Interested-Deving-1896/gha-monitor`](https://github.com/Interested-Deving-1896/gha-monitor) and mirrored through:
+
+```
+Interested-Deving-1896/gha-monitor  ──►  OpenOS-Project-OSP/gha-monitor  ──►  OpenOS-Project-Ecosystem-OOC/gha-monitor
+```
+
+Changes flow downstream automatically via the hourly mirror chain in
+[`fork-sync-all`](https://github.com/Interested-Deving-1896/fork-sync-all).
+Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-Deving-1896`.
+<!-- AI:end:mirror-chain -->
+
+## Contributors
+
+<!-- AI:start:contributors -->
+_Contributors pending._
+<!-- AI:end:contributors -->
+
+## Origins
+
+<!-- AI:start:origins -->
+_Original project — no upstream fork._
+<!-- AI:end:origins -->
+
+## Resources
+
+<!-- AI:start:resources -->
+_No additional resource files found._
+<!-- AI:end:resources -->
 
 ## License
 
-MIT
+<!-- AI:start:license -->
+[MIT](https://github.com/Interested-Deving-1896/gha-monitor/blob/main/LICENSE) © 2026 [Interested-Deving-1896](https://github.com/Interested-Deving-1896)
+<!-- AI:end:license -->
